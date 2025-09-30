@@ -1,0 +1,15 @@
+{
+  "domain": "firewalla",
+  "name": "Firewalla",
+  "codeowners": ["@custom-integration"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/custom-components/firewalla",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/custom-components/firewalla/issues",
+  "requirements": [
+    "aiohttp>=3.8.0"
+  ],
+  "version": "1.0.0"
+}

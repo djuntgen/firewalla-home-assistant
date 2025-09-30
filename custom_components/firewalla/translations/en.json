@@ -1,0 +1,112 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Firewalla MSP Setup",
+        "description": "Configure your Firewalla integration using MSP API credentials. You'll need a personal access token from your Firewalla MSP account.",
+        "data": {
+          "msp_url": "MSP API URL",
+          "access_token": "Personal Access Token"
+        },
+        "data_description": {
+          "msp_url": "The URL of your Firewalla MSP API endpoint (usually https://firewalla.encipher.io)",
+          "access_token": "Your personal access token from the Firewalla MSP account"
+        }
+      },
+      "device_selection": {
+        "title": "Select Firewalla Device",
+        "description": "Choose which Firewalla device to integrate with Home Assistant. You can create multiple integrations for different devices.",
+        "data": {
+          "box_gid": "Firewalla Device",
+          "name": "Integration Name"
+        },
+        "data_description": {
+          "box_gid": "Select the Firewalla device you want to integrate with Home Assistant",
+          "name": "Choose a descriptive name for this integration instance"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Firewalla MSP API. Please check your MSP URL and ensure your network connection allows HTTPS access to the API endpoint.",
+      "invalid_auth": "Invalid MSP API credentials. Please verify your personal access token is correct and has the necessary permissions to access your Firewalla devices.",
+      "no_devices": "No Firewalla devices found in your MSP account. Please ensure your MSP account has access to at least one Firewalla device and that the device is online.",
+      "unknown": "An unexpected error occurred while setting up the integration. Please check the Home Assistant logs for more details and try again.",
+      "name": "Integration name cannot be empty. Please provide a descriptive name for this integration instance.",
+      "timeout": "Connection to Firewalla MSP API timed out. Please check your network connection and try again.",
+      "rate_limit": "Too many requests to the Firewalla MSP API. Please wait a moment and try again.",
+      "server_error": "Firewalla MSP API server error. The service may be temporarily unavailable. Please try again later."
+    },
+    "abort": {
+      "already_configured": "This Firewalla device is already configured in Home Assistant. Each device can only be configured once per integration instance.",
+      "invalid_host": "The provided MSP API URL is not valid. Please check the URL format and try again.",
+      "auth_failed": "Authentication with the Firewalla MSP API failed. Please check your credentials and try again."
+    }
+  },
+  "entity": {
+    "switch": {
+      "block": {
+        "name": "{device_name} Internet Block",
+        "state": {
+          "on": "Blocked",
+          "off": "Allowed"
+        }
+      },
+      "gaming": {
+        "name": "{device_name} Gaming Pause",
+        "state": {
+          "on": "Paused",
+          "off": "Allowed"
+        }
+      }
+    },
+    "sensor": {
+      "device_status": {
+        "name": "{device_name} Status",
+        "state": {
+          "online": "Online",
+          "offline": "Offline",
+          "unknown": "Unknown"
+        }
+      },
+      "rules_count": {
+        "name": "Active Rules",
+        "state": {
+          "0": "No active rules",
+          "1": "1 active rule",
+          "other": "{count} active rules"
+        }
+      }
+    }
+  },
+  "services": {
+    "create_rule": {
+      "name": "Create Rule",
+      "description": "Create a new Firewalla rule for device blocking or gaming pause."
+    },
+    "pause_rule": {
+      "name": "Pause Rule",
+      "description": "Pause an existing Firewalla rule while preserving it for future use."
+    },
+    "unpause_rule": {
+      "name": "Unpause Rule",
+      "description": "Unpause a previously paused Firewalla rule."
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Authentication with Firewalla MSP API failed. Please check your credentials in the integration configuration."
+    },
+    "connection_error": {
+      "message": "Cannot connect to Firewalla MSP API. Please check your network connection and MSP URL."
+    },
+    "rate_limit": {
+      "message": "Firewalla MSP API rate limit exceeded. Please wait before making more requests."
+    },
+    "device_not_found": {
+      "message": "The specified Firewalla device was not found. It may have been removed or is no longer accessible."
+    },
+    "rule_creation_failed": {
+      "message": "Failed to create Firewalla rule. Please check the device status and try again."
+    }
+  }
+}

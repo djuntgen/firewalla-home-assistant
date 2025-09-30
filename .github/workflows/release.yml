@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    name: Create Release
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Validate version in manifest
+        run: |
+          MANIFEST_VERSION=$(python -c "import json; print(json.load(open('custom_components/firewalla/manifest.json'))['version'])")
+          if [ "$MANIFEST_VERSION" != "${{ steps.get_version.outputs.VERSION }}" ]; then
+            echo "Version mismatch: tag=${{ steps.get_version.outputs.VERSION }}, manifest=$MANIFEST_VERSION"
+            exit 1
+          fi
+
+      - name: Create release archive
+        run: |
+          cd custom_components
+          zip -r ../firewalla-${{ steps.get_version.outputs.VERSION }}.zip firewalla/
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          python -c "
+          import re
+          import sys
+          
+          with open('CHANGELOG.md') as f:
+              content = f.read()
+          
+          # Extract changelog for current version
+          version = '${{ steps.get_version.outputs.VERSION }}'
+          pattern = rf'## \[{re.escape(version)}\].*?(?=## \[|\Z)'
+          match = re.search(pattern, content, re.DOTALL)
+          
+          if match:
+              changelog = match.group(0).strip()
+              # Remove the version header
+              changelog = re.sub(rf'## \[{re.escape(version)}\].*?\n', '', changelog, count=1).strip()
+              print(changelog)
+          else:
+              print(f'No changelog found for version {version}')
+              sys.exit(1)
+          " > release_notes.txt
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ steps.get_version.outputs.VERSION }}
+          body_path: release_notes.txt
+          draft: false
+          prerelease: false
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./firewalla-${{ steps.get_version.outputs.VERSION }}.zip
+          asset_name: firewalla-${{ steps.get_version.outputs.VERSION }}.zip
+          asset_content_type: application/zip
