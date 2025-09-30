@@ -45,9 +45,9 @@ class FirewallaMSPClient:
             _LOGGER.debug("Attempting MSP API authentication")
             # Test authentication by fetching boxes list
             response = await self._make_request("GET", API_ENDPOINTS["boxes"], retry_auth=False)
-            if response and "data" in response:
+            if response and isinstance(response, list):
                 self._authenticated = True
-                _LOGGER.info("MSP API authentication successful")
+                _LOGGER.info("MSP API authentication successful, found %d boxes", len(response))
                 return True
             else:
                 _LOGGER.error("MSP API authentication failed: Invalid response format - %s", response)
@@ -74,7 +74,7 @@ class FirewallaMSPClient:
             
             # Test the current token by making a simple API call
             response = await self._make_request("GET", API_ENDPOINTS["boxes"], retry_auth=False)
-            if response and "data" in response:
+            if response and isinstance(response, list):
                 self._authenticated = True
                 _LOGGER.info("MSP API token refresh successful")
                 return True
@@ -100,7 +100,7 @@ class FirewallaMSPClient:
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Make an authenticated request to the MSP API with retry logic."""
-        url = f"{self._msp_url}{endpoint}"
+        url = f"{self._msp_url}/v2{endpoint}"
         headers = {
             "Authorization": f"Token {self._access_token}",
             "Content-Type": "application/json",
@@ -274,31 +274,39 @@ class FirewallaMSPClient:
         endpoint = API_ENDPOINTS["box_info"].format(gid=box_gid)
         return await self._make_request("GET", endpoint)
 
-    async def get_devices(self, box_gid: str) -> Dict[str, Any]:
-        """Get devices connected to a Firewalla box."""
-        endpoint = API_ENDPOINTS["devices"].format(gid=box_gid)
-        return await self._make_request("GET", endpoint)
+    async def get_devices(self, box_gid: Optional[str] = None) -> Dict[str, Any]:
+        """Get devices from MSP API (returns all devices across all boxes)."""
+        return await self._make_request("GET", API_ENDPOINTS["devices"])
 
-    async def get_rules(self, box_gid: str, query: Optional[str] = None) -> Dict[str, Any]:
-        """Get rules for a Firewalla box with optional query parameters."""
-        endpoint = API_ENDPOINTS["rules"].format(gid=box_gid)
+    async def get_rules(self, box_gid: Optional[str] = None, query: Optional[str] = None) -> Dict[str, Any]:
+        """Get rules from MSP API with optional query parameters."""
+        endpoint = API_ENDPOINTS["rules"]
+        params = {}
         if query:
-            endpoint += f"?query={query}"
+            params["query"] = query
+        if box_gid:
+            params["gid"] = box_gid
+        
+        if params:
+            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
+            endpoint += f"?{query_string}"
         return await self._make_request("GET", endpoint)
 
     async def create_rule(self, box_gid: str, rule_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new rule for a Firewalla box."""
-        endpoint = API_ENDPOINTS["create_rule"].format(gid=box_gid)
-        return await self._make_request("POST", endpoint, data=rule_data)
+        """Create a new rule via MSP API."""
+        # Add box_gid to rule data if not present
+        if "gid" not in rule_data and box_gid:
+            rule_data["gid"] = box_gid
+        return await self._make_request("POST", API_ENDPOINTS["create_rule"], data=rule_data)
 
     async def pause_rule(self, box_gid: str, rule_id: str) -> Dict[str, Any]:
-        """Pause a rule for a Firewalla box."""
-        endpoint = API_ENDPOINTS["pause_rule"].format(gid=box_gid, rid=rule_id)
+        """Pause a rule via MSP API."""
+        endpoint = API_ENDPOINTS["pause_rule"].format(rid=rule_id)
         return await self._make_request("POST", endpoint)
 
     async def unpause_rule(self, box_gid: str, rule_id: str) -> Dict[str, Any]:
-        """Unpause a rule for a Firewalla box."""
-        endpoint = API_ENDPOINTS["unpause_rule"].format(gid=box_gid, rid=rule_id)
+        """Unpause a rule via MSP API."""
+        endpoint = API_ENDPOINTS["unpause_rule"].format(rid=rule_id)
         return await self._make_request("POST", endpoint)
 
     @property
@@ -363,23 +371,19 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.error("Failed to fetch rules: %s", rules)
                     raise rules
                 
-                # Validate API responses
-                if not isinstance(box_info, dict) or "data" not in box_info:
-                    _LOGGER.error("Invalid box info response format: %s", box_info)
-                    raise UpdateFailed("Invalid box info response from MSP API")
-                
-                if not isinstance(devices, dict) or "data" not in devices:
-                    _LOGGER.error("Invalid devices response format: %s", devices)
+                # Validate API responses - MSP API returns arrays directly
+                if not isinstance(devices, list):
+                    _LOGGER.error("Invalid devices response format: %s", type(devices))
                     raise UpdateFailed("Invalid devices response from MSP API")
                 
-                if not isinstance(rules, dict) or "data" not in rules:
-                    _LOGGER.error("Invalid rules response format: %s", rules)
+                if not isinstance(rules, list):
+                    _LOGGER.error("Invalid rules response format: %s", type(rules))
                     raise UpdateFailed("Invalid rules response from MSP API")
                 
                 # Process and structure the data
-                box_data = box_info.get("data", {})
-                devices_data = self._process_devices_data(devices.get("data", {}))
-                rules_data = self._process_rules_data(rules.get("data", {}))
+                box_data = box_info if isinstance(box_info, dict) else {}
+                devices_data = self._process_devices_data(devices)
+                rules_data = self._process_rules_data(rules)
                 
                 processed_data = {
                     "box_info": box_data,
@@ -413,30 +417,33 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.exception("Unexpected error during MSP API data update: %s", err)
             raise UpdateFailed(f"Unexpected error communicating with MSP API: {err}") from err
 
-    def _process_devices_data(self, devices_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process and normalize devices data from the API."""
-        if not isinstance(devices_data, dict):
+    def _process_devices_data(self, devices_data: list) -> Dict[str, Any]:
+        """Process and normalize devices data from the MSP API."""
+        if not isinstance(devices_data, list):
             _LOGGER.warning("Invalid devices data format received from API: %s", type(devices_data))
             return {}
         
         processed_devices = {}
         invalid_devices = 0
         
-        for device_id, device_info in devices_data.items():
+        for device_info in devices_data:
             try:
                 if not isinstance(device_info, dict):
-                    _LOGGER.debug("Skipping invalid device data for %s: %s", device_id, type(device_info))
+                    _LOGGER.debug("Skipping invalid device data: %s", type(device_info))
                     invalid_devices += 1
                     continue
                 
+                # Use MAC address as the key, or generate one if missing
+                device_mac = device_info.get("mac", device_info.get("id", f"unknown_{len(processed_devices)}"))
+                
                 # Ensure required fields exist with defaults
                 processed_device = {
-                    "mac": device_info.get("mac", device_id),
-                    "name": device_info.get("name", f"Device {device_id}"),
+                    "mac": device_mac,
+                    "name": device_info.get("name", f"Device {device_mac}"),
                     "ip": device_info.get("ip", ""),
                     "online": bool(device_info.get("online", False)),
-                    "lastActiveTimestamp": device_info.get("lastActiveTimestamp", 0),
-                    "deviceClass": device_info.get("deviceClass", "unknown"),
+                    "lastActiveTimestamp": device_info.get("lastActiveTimestamp", device_info.get("lastSeen", 0)),
+                    "deviceClass": device_info.get("deviceClass", device_info.get("type", "unknown")),
                 }
                 
                 # Include all original fields, but validate critical ones
@@ -444,10 +451,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     if key not in processed_device:
                         processed_device[key] = value
                 
-                processed_devices[device_id] = processed_device
+                processed_devices[device_mac] = processed_device
                 
             except Exception as err:
-                _LOGGER.warning("Error processing device %s: %s", device_id, err)
+                _LOGGER.warning("Error processing device: %s", err)
                 invalid_devices += 1
                 continue
         
@@ -457,25 +464,28 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Processed %d valid devices", len(processed_devices))
         return processed_devices
 
-    def _process_rules_data(self, rules_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process and normalize rules data from the API."""
-        if not isinstance(rules_data, dict):
+    def _process_rules_data(self, rules_data: list) -> Dict[str, Any]:
+        """Process and normalize rules data from the MSP API."""
+        if not isinstance(rules_data, list):
             _LOGGER.warning("Invalid rules data format received from API: %s", type(rules_data))
             return {}
         
         processed_rules = {}
         invalid_rules = 0
         
-        for rule_id, rule_info in rules_data.items():
+        for rule_info in rules_data:
             try:
                 if not isinstance(rule_info, dict):
-                    _LOGGER.debug("Skipping invalid rule data for %s: %s", rule_id, type(rule_info))
+                    _LOGGER.debug("Skipping invalid rule data: %s", type(rule_info))
                     invalid_rules += 1
                     continue
                 
+                # Use rule ID as the key
+                rule_id = rule_info.get("id", rule_info.get("rid", f"rule_{len(processed_rules)}"))
+                
                 # Ensure required fields exist with defaults
                 processed_rule = {
-                    "rid": rule_info.get("rid", rule_id),
+                    "rid": rule_id,
                     "type": rule_info.get("type", "unknown"),
                     "target": rule_info.get("target", ""),
                     "disabled": bool(rule_info.get("disabled", False)),
@@ -492,7 +502,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                 processed_rules[rule_id] = processed_rule
                 
             except Exception as err:
-                _LOGGER.warning("Error processing rule %s: %s", rule_id, err)
+                _LOGGER.warning("Error processing rule: %s", err)
                 invalid_rules += 1
                 continue
         
@@ -517,8 +527,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Fetching devices directly from API for box %s", self.box_gid)
             response = await self.api.get_devices(self.box_gid)
             
-            if response and "data" in response:
-                devices_data = self._process_devices_data(response["data"])
+            if response and isinstance(response, list):
+                devices_data = self._process_devices_data(response)
                 _LOGGER.debug("Retrieved %d devices from API", len(devices_data))
                 return devices_data
             else:
@@ -547,21 +557,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Fetching rules from API for box %s with query: %s", self.box_gid, query)
             response = await self.api.get_rules(self.box_gid, query)
             
-            if response and "data" in response:
-                # Handle both direct data and paginated results
-                rules_data = response["data"]
-                if isinstance(rules_data, dict) and "results" in rules_data:
-                    # Paginated response format
-                    rules_list = rules_data["results"]
-                    rules_dict = {rule.get("id", rule.get("rid", str(i))): rule for i, rule in enumerate(rules_list)}
-                elif isinstance(rules_data, list):
-                    # Direct list format
-                    rules_dict = {rule.get("id", rule.get("rid", str(i))): rule for i, rule in enumerate(rules_data)}
-                else:
-                    # Direct dictionary format
-                    rules_dict = rules_data
-                
-                processed_rules = self._process_rules_data(rules_dict)
+            if response and isinstance(response, list):
+                processed_rules = self._process_rules_data(response)
                 _LOGGER.debug("Retrieved %d rules from API", len(processed_rules))
                 return processed_rules
             else:
@@ -602,11 +599,11 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             
             result = await self.api.create_rule(self.box_gid, rule_data)
             
-            if result and "data" in result:
-                _LOGGER.info("Successfully created rule: %s", result["data"].get("id", "unknown"))
+            if result and isinstance(result, dict):
+                _LOGGER.info("Successfully created rule: %s", result.get("id", "unknown"))
                 # Trigger a data refresh to get the updated rules
                 await self.async_request_refresh()
-                return result["data"]
+                return result
             else:
                 _LOGGER.error("Invalid response when creating rule: %s", result)
                 raise HomeAssistantError("Failed to create rule: Invalid API response")

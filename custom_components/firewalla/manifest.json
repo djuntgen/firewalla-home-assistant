@@ -1,13 +1,15 @@
 {
   "domain": "firewalla",
   "name": "Firewalla",
-  "codeowners": ["@custom-integration"],
+  "codeowners": [
+    "@custom-integration"
+  ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/custom-components/firewalla",
+  "documentation": "https://github.com/djuntgen/firewalla-home-assistant",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/custom-components/firewalla/issues",
+  "issue_tracker": "https://github.com/djuntgen/firewalla-home-assistant/issues",
   "requirements": [
     "aiohttp>=3.8.0"
   ],

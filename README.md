@@ -1,8 +1,8 @@
 # Firewalla Home Assistant Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![GitHub release](https://img.shields.io/github/release/custom-components/firewalla.svg)](https://github.com/custom-components/firewalla/releases)
-[![License](https://img.shields.io/github/license/custom-components/firewalla.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/release/djuntgen/firewalla-home-assistant.svg)](https://github.com/djuntgen/firewalla-home-assistant/releases)
+[![License](https://img.shields.io/github/license/djuntgen/firewalla-home-assistant.svg)](LICENSE)
 
 A comprehensive Home Assistant integration for Firewalla firewall devices using the MSP (Managed Service Provider) API. Control device internet access, manage gaming pause rules, and monitor device status directly from Home Assistant.
 
@@ -37,7 +37,7 @@ A comprehensive Home Assistant integration for Firewalla firewall devices using 
 2. Go to "Integrations"
 3. Click the three dots in the top right corner
 4. Select "Custom repositories"
-5. Add this repository URL: `https://github.com/custom-components/firewalla`
+5. Add this repository URL: `https://github.com/djuntgen/firewalla-home-assistant`
 6. Select "Integration" as the category
 7. Click "Add"
 8. Find "Firewalla" in the integration list and install it
@@ -45,7 +45,7 @@ A comprehensive Home Assistant integration for Firewalla firewall devices using 
 
 ### Manual Installation
 
-1. Download the latest release from the [releases page](https://github.com/custom-components/firewalla/releases)
+1. Download the latest release from the [releases page](https://github.com/djuntgen/firewalla-home-assistant/releases)
 2. Extract the `custom_components/firewalla` folder to your Home Assistant `custom_components` directory
 3. Restart Home Assistant
 
@@ -55,7 +55,7 @@ A comprehensive Home Assistant integration for Firewalla firewall devices using 
 
 1. **Firewalla MSP Account**: You need access to Firewalla's MSP (Managed Service Provider) API
 2. **Personal Access Token**: Generate a personal access token from your MSP account
-3. **MSP API URL**: Usually `https://firewalla.encipher.io` (default)
+3. **MSP API URL**: Your MSP domain in format `https://yourdomain.firewalla.net`
 
 ### Setup Steps
 
@@ -72,7 +72,7 @@ A comprehensive Home Assistant integration for Firewalla firewall devices using 
 
 | Field | Description | Required | Default |
 |-------|-------------|----------|---------|
-| MSP API URL | Firewalla MSP API endpoint | Yes | `https://firewalla.encipher.io` |
+| MSP API URL | Firewalla MSP API endpoint | Yes | `https://mydomain.firewalla.net` |
 | Personal Access Token | Your MSP API access token | Yes | - |
 | Firewalla Device | Select from discovered devices | Yes | - |
 | Integration Name | Name for this integration instance | Yes | Auto-generated |
@@ -269,8 +269,8 @@ The project maintains high code quality standards:
 
 ### Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/custom-components/firewalla/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/custom-components/firewalla/discussions)
+- **Issues**: [GitHub Issues](https://github.com/djuntgen/firewalla-home-assistant/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/djuntgen/firewalla-home-assistant/discussions)
 - **Home Assistant Community**: [Community Forum](https://community.home-assistant.io/)
 
 ### Reporting Bugs

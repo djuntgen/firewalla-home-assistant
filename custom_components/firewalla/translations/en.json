@@ -9,7 +9,7 @@
           "access_token": "Personal Access Token"
         },
         "data_description": {
-          "msp_url": "The URL of your Firewalla MSP API endpoint (usually https://firewalla.encipher.io)",
+          "msp_url": "Your Firewalla MSP domain URL (format: https://yourdomain.firewalla.net)",
           "access_token": "Your personal access token from the Firewalla MSP account"
         }
       },

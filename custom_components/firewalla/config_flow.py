@@ -95,12 +95,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = ERROR_UNKNOWN
 
         # Show the form for MSP URL and access token input
+        # Retain previously entered values if they exist
+        msp_url_default = self._msp_url if self._msp_url else DEFAULT_MSP_URL
+        access_token_default = self._access_token if self._access_token else ""
+        
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_MSP_URL, default=DEFAULT_MSP_URL): str,
-                    vol.Required(CONF_ACCESS_TOKEN): str,
+                    vol.Required(CONF_MSP_URL, default=msp_url_default): str,
+                    vol.Required(CONF_ACCESS_TOKEN, default=access_token_default): str,
                 }
             ),
             errors=errors,
@@ -241,31 +245,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.debug("Fetching Firewalla devices from MSP API")
             boxes_response = await client.get_boxes()
             
-            if not boxes_response or not isinstance(boxes_response, dict):
-                _LOGGER.error("Invalid response from MSP API: %s", boxes_response)
+            if not boxes_response or not isinstance(boxes_response, list):
+                _LOGGER.error("Invalid response from MSP API: %s", type(boxes_response))
                 raise CannotConnect("Invalid response from MSP API")
-                
-            boxes_data = boxes_response.get("data", {})
             
-            if not boxes_data:
+            if not boxes_response:
                 _LOGGER.warning("No Firewalla devices found in MSP account")
                 self._available_devices = {}
                 return
 
-            # Process boxes data - handle both list and dict formats
-            if isinstance(boxes_data, list):
-                for box in boxes_data:
-                    if isinstance(box, dict) and "gid" in box:
-                        self._available_devices[box["gid"]] = box
-                        _LOGGER.debug("Found device: %s (%s)", box.get("name", "Unknown"), box["gid"])
-            elif isinstance(boxes_data, dict):
-                # If boxes_data is a dict, it might be keyed by gid
-                for gid, box_info in boxes_data.items():
-                    if isinstance(box_info, dict):
-                        # Ensure gid is in the box_info
-                        box_info["gid"] = gid
-                        self._available_devices[gid] = box_info
-                        _LOGGER.debug("Found device: %s (%s)", box_info.get("name", "Unknown"), gid)
+            # Process boxes data - MSP API returns array directly
+            for box in boxes_response:
+                if isinstance(box, dict) and "gid" in box:
+                    self._available_devices[box["gid"]] = box
+                    _LOGGER.debug("Found device: %s (%s)", box.get("name", "Unknown"), box["gid"])
 
             _LOGGER.info("Found %d Firewalla devices in MSP account", len(self._available_devices))
             

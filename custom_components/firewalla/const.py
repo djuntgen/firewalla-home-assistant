@@ -8,23 +8,18 @@ CONF_MSP_URL = "msp_url"
 CONF_ACCESS_TOKEN = "access_token"
 CONF_BOX_GID = "box_gid"
 
-# Default MSP API URL
-DEFAULT_MSP_URL = "https://firewalla.encipher.io"
+# Default MSP API URL format (user should replace 'mydomain' with their actual domain)
+DEFAULT_MSP_URL = "https://mydomain.firewalla.net"
 
-# API endpoints
+# API endpoints (based on MSP API examples)
 API_ENDPOINTS = {
-    "boxes": "/v2/msp/boxes",
-    "box_info": "/v2/msp/boxes/{gid}",
-    "devices": "/v2/msp/boxes/{gid}/devices",
-    "rules": "/v2/msp/boxes/{gid}/rules",
-    "create_rule": "/v2/msp/boxes/{gid}/rules",
-    "pause_rule": "/v2/msp/boxes/{gid}/rules/{rid}/pause",
-    "unpause_rule": "/v2/msp/boxes/{gid}/rules/{rid}/unpause",
-    # Alternative v2 endpoints (based on MSP API examples)
-    "v2_devices": "/v2/devices",
-    "v2_rules": "/v2/rules",
-    "v2_pause_rule": "/v2/rules/{rid}/pause",
-    "v2_unpause_rule": "/v2/rules/{rid}/unpause",
+    "boxes": "/boxes",
+    "box_info": "/boxes/{gid}",
+    "devices": "/devices",
+    "rules": "/rules",
+    "create_rule": "/rules",
+    "pause_rule": "/rules/{rid}/pause",
+    "unpause_rule": "/rules/{rid}/unpause",
 }
 
 # Timeouts and intervals
