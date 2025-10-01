@@ -4,30 +4,33 @@
 [![GitHub release](https://img.shields.io/github/release/djuntgen/firewalla-home-assistant.svg)](https://github.com/djuntgen/firewalla-home-assistant/releases)
 [![License](https://img.shields.io/github/license/djuntgen/firewalla-home-assistant.svg)](LICENSE)
 
-A comprehensive Home Assistant integration for Firewalla firewall devices using the MSP (Managed Service Provider) API. Control device internet access, manage gaming pause rules, and monitor device status directly from Home Assistant.
+A Home Assistant integration for Firewalla firewall devices that provides **rule management and control** through the MSP (Managed Service Provider) API. Automatically discover your existing Firewalla rules and control them (pause/unpause) directly from Home Assistant.
 
 ## Features
 
-### 🛡️ Internet Blocking Controls
-- **Device Blocking Switches**: Block/unblock internet access for individual devices
-- **Rule Preservation**: Paused rules are preserved for easy re-activation
-- **Real-time Status**: Immediate feedback on rule activation status
+### 🛡️ Automatic Rule Discovery
+- **Rule Detection**: Automatically discovers all existing Firewalla rules
+- **Switch Entities**: Creates a switch entity for each controllable rule
+- **Dynamic Updates**: Automatically adds new rules and removes deleted ones
+- **Real-time Sync**: Keeps Home Assistant entities synchronized with Firewalla
 
-### 🎮 Gaming Management
-- **Gaming Pause Switches**: Temporarily pause gaming for gaming-capable devices
-- **Smart Device Detection**: Automatically identifies gaming consoles and devices
-- **Flexible Control**: Pause and resume gaming access as needed
+### 🎛️ Rule Control
+- **Pause/Unpause Rules**: Turn switches ON to activate rules, OFF to pause them
+- **Rule Preservation**: Paused rules retain all configuration for easy re-activation
+- **Instant Control**: Immediate rule state changes through Home Assistant
+- **Bulk Management**: Control multiple rules through automations and scripts
 
-### 📊 Device Monitoring
-- **Device Status Sensors**: Monitor online/offline status of all managed devices
-- **Rich Attributes**: Access device information including IP, MAC, hostname, and device class
-- **Rules Count Sensor**: Track active integration-managed rules
+### 📊 Rich Rule Information
+- **Rule Metadata**: View rule type, target, description, priority, and schedule
+- **Rule Statistics**: Monitor total, active, and paused rule counts
+- **Rule History**: Track rule creation and modification timestamps
+- **Integration Health**: Monitor API connectivity and rule synchronization status
 
 ### 🔧 Advanced Features
-- **MSP API Integration**: Full integration with Firewalla's MSP API
-- **Automatic Discovery**: Discover and select from available Firewalla devices
+- **MSP API Integration**: Full integration with Firewalla's MSP API v2
+- **Automatic Discovery**: Discover and select from available Firewalla boxes
 - **Error Recovery**: Robust error handling with automatic retry logic
-- **Rate Limiting**: Respects API rate limits with intelligent caching
+- **Rate Limiting**: Respects API rate limits with intelligent caching and batching
 
 ## Installation
 
@@ -54,72 +57,76 @@ A comprehensive Home Assistant integration for Firewalla firewall devices using 
 ### Prerequisites
 
 1. **Firewalla MSP Account**: You need access to Firewalla's MSP (Managed Service Provider) API
-2. **Personal Access Token**: Generate a personal access token from your MSP account
-3. **MSP API URL**: Your MSP domain in format `https://yourdomain.firewalla.net`
+2. **Personal Access Token**: Generate a personal access token from your MSP account settings
+3. **MSP Domain**: Your MSP domain (e.g., `mydomain.firewalla.net` or `https://mydomain.firewalla.net`)
+4. **Existing Rules**: The integration manages existing Firewalla rules (it doesn't create new ones)
 
 ### Setup Steps
 
 1. Go to **Configuration** → **Integrations** in Home Assistant
 2. Click **Add Integration** and search for "Firewalla"
-3. Enter your MSP API credentials:
-   - **MSP API URL**: Your Firewalla MSP API endpoint
-   - **Personal Access Token**: Your MSP API token
-4. Select your Firewalla device from the discovered devices
-5. Choose a name for the integration instance
-6. Complete the setup
+3. Enter your MSP credentials:
+   - **MSP Domain**: Your Firewalla MSP domain (e.g., `mydomain.firewalla.net` or `https://mydomain.firewalla.net`)
+   - **Personal Access Token**: Your MSP API access token
+4. Select your Firewalla box (if you have multiple boxes)
+5. Complete the setup and wait for rule discovery
 
 ### Configuration Options
 
-| Field | Description | Required | Default |
+| Field | Description | Required | Example |
 |-------|-------------|----------|---------|
-| MSP API URL | Firewalla MSP API endpoint | Yes | `https://mydomain.firewalla.net` |
-| Personal Access Token | Your MSP API access token | Yes | - |
-| Firewalla Device | Select from discovered devices | Yes | - |
-| Integration Name | Name for this integration instance | Yes | Auto-generated |
+| MSP Domain | Firewalla MSP domain | Yes | `mydomain.firewalla.net` or `https://mydomain.firewalla.net` |
+| Personal Access Token | Your MSP API access token | Yes | `msp_token_abc123...` |
+| Firewalla Box | Select from discovered boxes | Yes | Auto-selected if only one |
 
 ## Entities
 
-### Switch Entities
+### Switch Entities (Rule Control)
 
-#### Internet Blocking Switches
-- **Entity ID**: `switch.firewalla_{device_name}_block`
-- **Purpose**: Block/unblock internet access for specific devices
+#### Rule Control Switches
+- **Entity ID**: `switch.firewalla_rule_{rule_id}`
+- **Purpose**: Control individual Firewalla rules (pause/unpause)
 - **States**: 
-  - `on`: Internet access is blocked
-  - `off`: Internet access is allowed
-- **Attributes**: Device MAC, IP, hostname, rule status, last updated
-
-#### Gaming Pause Switches
-- **Entity ID**: `switch.firewalla_{device_name}_gaming`
-- **Purpose**: Pause/resume gaming for gaming-capable devices
-- **States**:
-  - `on`: Gaming is paused
-  - `off`: Gaming is allowed
-- **Attributes**: Device MAC, IP, hostname, rule status, gaming device class
-- **Note**: Only created for devices identified as gaming-capable
+  - `on`: Rule is active (unpaused)
+  - `off`: Rule is paused (temporarily disabled)
+- **Naming**: Uses rule description or falls back to rule type and target
+- **Attributes**: 
+  - `rule_id`: Firewalla rule identifier
+  - `rule_type`: Type of rule (internet, category, domain, etc.)
+  - `target`: Rule target (MAC address, category, domain, etc.)
+  - `target_name`: Human-readable target name
+  - `action`: Rule action (block, allow, etc.)
+  - `priority`: Rule priority level
+  - `schedule`: Rule schedule information (if applicable)
+  - `created_at`: Rule creation timestamp
+  - `modified_at`: Rule last modification timestamp
+  - `description`: Rule description
 
 ### Sensor Entities
 
-#### Device Status Sensors
-- **Entity ID**: `sensor.firewalla_{device_name}_status`
-- **Purpose**: Monitor device online/offline status
-- **States**: `online`, `offline`, `unknown`
-- **Attributes**: MAC address, IP address, hostname, device class, last seen timestamp
-
-#### Rules Count Sensor
-- **Entity ID**: `sensor.firewalla_rules_active`
-- **Purpose**: Track active integration-managed rules
-- **State**: Number of active rules
-- **Attributes**: Total rules, rule types breakdown, last updated timestamp
+#### Rules Summary Sensor
+- **Entity ID**: `sensor.firewalla_rules_summary`
+- **Purpose**: Monitor overall rule statistics and integration health
+- **State**: Total number of discovered rules
+- **Attributes**: 
+  - `total_rules`: Total number of discovered rules
+  - `active_rules`: Number of active (unpaused) rules
+  - `paused_rules`: Number of paused rules
+  - `rules_by_type`: Breakdown of rules by type (internet, category, domain, etc.)
+  - `last_updated`: Last successful rule discovery timestamp
+  - `api_status`: Current API connectivity status
+  - `box_name`: Firewalla box name
+  - `box_model`: Firewalla box model
+  - `box_online`: Firewalla box online status
 
 ## Usage Examples
 
 ### Automations
 
-#### Block Device During Work Hours
+#### Activate Rules During Work Hours
 ```yaml
 automation:
-  - alias: "Block Gaming Device During Work Hours"
+  - alias: "Activate Gaming Block During Work Hours"
     trigger:
       - platform: time
         at: "09:00:00"
@@ -134,59 +141,98 @@ automation:
     action:
       - service: switch.turn_on
         target:
-          entity_id: switch.firewalla_gaming_console_block
+          entity_id: switch.firewalla_rule_gaming_block_rule
 ```
 
-#### Gaming Time Limits
+#### Pause Rules in the Evening
 ```yaml
 automation:
-  - alias: "Gaming Time Limit"
+  - alias: "Pause Internet Restrictions in Evening"
     trigger:
       - platform: time
-        at: "21:00:00"  # 9 PM
+        at: "18:00:00"  # 6 PM
     action:
-      - service: switch.turn_on
+      - service: switch.turn_off
         target:
-          entity_id: switch.firewalla_xbox_gaming
+          entity_id: 
+            - switch.firewalla_rule_internet_block_kids
+            - switch.firewalla_rule_gaming_restriction
 ```
 
-#### Device Status Notifications
+#### Rule Status Notifications
 ```yaml
 automation:
-  - alias: "Notify When Device Goes Offline"
+  - alias: "Notify When Rules Change"
     trigger:
       - platform: state
-        entity_id: sensor.firewalla_laptop_status
-        to: "offline"
-        for:
-          minutes: 5
+        entity_id: sensor.firewalla_rules_summary
+        attribute: active_rules
     action:
       - service: notify.mobile_app
         data:
-          message: "Laptop has been offline for 5 minutes"
+          message: "Firewalla active rules changed to {{ trigger.to_state.attributes.active_rules }}"
+```
+
+#### Weekend Rule Management
+```yaml
+automation:
+  - alias: "Weekend Rule Relaxation"
+    trigger:
+      - platform: time
+        at: "08:00:00"
+    condition:
+      - condition: time
+        weekday:
+          - sat
+          - sun
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: 
+            - switch.firewalla_rule_school_hours_block
+            - switch.firewalla_rule_gaming_weekday_limit
 ```
 
 ### Dashboard Cards
 
-#### Device Control Card
+#### Rule Control Card
 ```yaml
 type: entities
-title: Firewalla Device Control
+title: Firewalla Rule Control
 entities:
-  - switch.firewalla_laptop_block
-  - switch.firewalla_gaming_console_block
-  - switch.firewalla_gaming_console_gaming
-  - sensor.firewalla_rules_active
+  - switch.firewalla_rule_internet_block_kids
+  - switch.firewalla_rule_gaming_restriction
+  - switch.firewalla_rule_social_media_block
+  - sensor.firewalla_rules_summary
 ```
 
-#### Device Status Card
+#### Rule Statistics Card
 ```yaml
 type: glance
-title: Device Status
+title: Rule Statistics
 entities:
-  - sensor.firewalla_laptop_status
-  - sensor.firewalla_phone_status
-  - sensor.firewalla_gaming_console_status
+  - entity: sensor.firewalla_rules_summary
+    name: Total Rules
+  - entity: sensor.firewalla_rules_summary
+    name: Active Rules
+    attribute: active_rules
+  - entity: sensor.firewalla_rules_summary
+    name: Paused Rules
+    attribute: paused_rules
+```
+
+#### Rule Management Card
+```yaml
+type: custom:auto-entities
+card:
+  type: entities
+  title: All Firewalla Rules
+filter:
+  include:
+    - entity_id: "switch.firewalla_rule_*"
+  exclude: []
+sort:
+  method: name
 ```
 
 ## Troubleshooting
@@ -204,16 +250,28 @@ entities:
   - Verify network connectivity
   - Ensure firewall allows outbound HTTPS connections
 
-#### No Devices Found
-- **Problem**: "No Firewalla devices found in your MSP account"
-- **Solution**: Ensure your MSP account has access to at least one Firewalla device
+#### No Boxes Found
+- **Problem**: "No Firewalla boxes found in your MSP account"
+- **Solution**: Ensure your MSP account has access to at least one Firewalla box
+
+#### Rule Access Failed
+- **Problem**: "Cannot access rules. Please check your MSP permissions"
+- **Solution**: Verify your MSP account has permissions to view and manage rules
+
+#### No Rules Discovered
+- **Problem**: Integration sets up but no rule entities are created
+- **Solutions**:
+  - Ensure you have existing rules in your Firewalla configuration
+  - Check that rules are not disabled or system-managed
+  - Verify API permissions allow rule access
 
 #### Entities Not Updating
-- **Problem**: Entity states not reflecting current status
+- **Problem**: Rule entity states not reflecting current status
 - **Solutions**:
   - Check Home Assistant logs for API errors
-  - Verify Firewalla device is online and accessible
+  - Verify Firewalla box is online and accessible
   - Try reloading the integration
+  - Check if rules were modified outside of Home Assistant
 
 ### Debug Logging
 

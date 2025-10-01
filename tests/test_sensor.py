@@ -1,392 +1,280 @@
-"""Tests for Firewalla sensor entities."""
+"""Tests for Firewalla rule statistics sensor entities."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.firewalla.sensor import (
-    FirewallaDeviceStatusSensor,
     FirewallaRulesSensor,
     async_setup_entry,
 )
+from custom_components.firewalla.const import DOMAIN, ENTITY_ID_FORMATS
 
 
-class TestAsyncSetupEntry:
-    """Test sensor platform setup."""
-
-    @pytest.mark.asyncio
-    async def test_setup_entry_success(self, mock_hass, mock_config_entry, mock_coordinator_data):
-        """Test successful sensor platform setup."""
-        # Mock coordinator
-        mock_coordinator = MagicMock()
-        mock_coordinator.devices = mock_coordinator_data["devices"]
-        mock_coordinator.get_device_friendly_name.return_value = "Test Device"
-        mock_coordinator.get_device_info_dict.return_value = {"name": "Test Device"}
-        
-        # Store coordinator in hass.data
-        mock_hass.data = {"firewalla": {mock_config_entry.entry_id: mock_coordinator}}
-        
-        # Mock async_add_entities
-        mock_add_entities = AsyncMock()
-        
-        await async_setup_entry(mock_hass, mock_config_entry, mock_add_entities)
-        
-        # Verify entities were added
-        mock_add_entities.assert_called_once()
-        entities = mock_add_entities.call_args[0][0]
-        
-        # Should have 3 entities: 2 device sensors + 1 rules sensor
-        assert len(entities) == 3
-        
-        # Check entity types
-        device_sensors = [e for e in entities if isinstance(e, FirewallaDeviceStatusSensor)]
-        rules_sensors = [e for e in entities if isinstance(e, FirewallaRulesSensor)]
-        
-        assert len(device_sensors) == 2  # One for each device
-        assert len(rules_sensors) == 1   # One rules sensor
-
-    @pytest.mark.asyncio
-    async def test_setup_entry_no_devices(self, mock_hass, mock_config_entry):
-        """Test sensor platform setup with no devices."""
-        # Mock coordinator with no devices
-        mock_coordinator = MagicMock()
-        mock_coordinator.devices = {}
-        
-        # Store coordinator in hass.data
-        mock_hass.data = {"firewalla": {mock_config_entry.entry_id: mock_coordinator}}
-        
-        # Mock async_add_entities
-        mock_add_entities = AsyncMock()
-        
-        await async_setup_entry(mock_hass, mock_config_entry, mock_add_entities)
-        
-        # Verify only rules sensor was added
-        mock_add_entities.assert_called_once()
-        entities = mock_add_entities.call_args[0][0]
-        assert len(entities) == 1
-        assert isinstance(entities[0], FirewallaRulesSensor)
-
-    @pytest.mark.asyncio
-    async def test_setup_entry_missing_coordinator(self, mock_hass, mock_config_entry):
-        """Test sensor platform setup with missing coordinator."""
-        # No coordinator in hass.data
-        mock_hass.data = {"firewalla": {}}
-        
-        # Mock async_add_entities
-        mock_add_entities = AsyncMock()
-        
-        with pytest.raises(HomeAssistantError, match="Coordinator not found"):
-            await async_setup_entry(mock_hass, mock_config_entry, mock_add_entities)
+@pytest.fixture
+def mock_coordinator():
+    """Create a mock coordinator with rule statistics data."""
+    coordinator = MagicMock(spec=DataUpdateCoordinator)
+    coordinator.data = {
+        "rules": {
+            "rule-123": {
+                "rid": "rule-123",
+                "type": "internet",
+                "disabled": False,
+                "paused": False,
+                "action": "block",
+                "description": "Active rule",
+            },
+            "rule-456": {
+                "rid": "rule-456",
+                "type": "category",
+                "disabled": False,
+                "paused": True,
+                "action": "block",
+                "description": "Paused rule",
+            },
+            "rule-789": {
+                "rid": "rule-789",
+                "type": "domain",
+                "disabled": True,
+                "paused": False,
+                "action": "block",
+                "description": "Disabled rule",
+            },
+        },
+        "rule_count": {
+            "total": 3,
+            "active": 1,
+            "paused": 1,
+            "by_type": {
+                "internet": 1,
+                "category": 1,
+                "domain": 1,
+            },
+        },
+        "box_info": {
+            "gid": "box-123",
+            "name": "Firewalla Gold",
+            "model": "gold",
+            "online": True,
+            "version": "1.975",
+        },
+        "last_updated": "2023-01-01T12:00:00",
+    }
+    coordinator.box_gid = "box-123"
+    coordinator.last_update_success = True
+    return coordinator
 
 
-class TestFirewallaDeviceStatusSensor:
-    """Test Firewalla device status sensor entity."""
+@pytest.fixture
+def mock_hass():
+    """Create a mock Home Assistant instance."""
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"test_entry": MagicMock()}}
+    return hass
 
-    @pytest.fixture
-    def mock_coordinator(self, mock_coordinator_data):
-        """Create a mock coordinator."""
-        coordinator = MagicMock()
-        coordinator.data = mock_coordinator_data
-        coordinator.devices = mock_coordinator_data["devices"]
-        coordinator.box_info = mock_coordinator_data["box_info"]
-        coordinator.last_update_success = True
-        coordinator.get_device_by_mac.return_value = mock_coordinator_data["devices"]["aa:bb:cc:dd:ee:ff"]
-        coordinator.get_device_friendly_name.return_value = "Test Device 1"
-        coordinator.get_device_info_dict.return_value = {
-            "identifiers": {("firewalla", "aa:bb:cc:dd:ee:ff")},
-            "name": "Test Device 1",
-            "manufacturer": "Firewalla",
-            "model": "Gold",
-            "sw_version": "1.975",
-        }
-        return coordinator
 
-    @pytest.fixture
-    def device_sensor(self, mock_coordinator, mock_devices_data):
-        """Create a device status sensor entity."""
-        device_mac = "aa:bb:cc:dd:ee:ff"
-        device_data = mock_devices_data[device_mac]
-        return FirewallaDeviceStatusSensor(mock_coordinator, device_mac, device_data)
-
-    def test_unique_id(self, device_sensor):
-        """Test sensor unique ID generation."""
-        assert device_sensor.unique_id == "firewalla_aabbccddeeff_status"
-
-    def test_name(self, device_sensor):
-        """Test sensor name generation."""
-        assert "Test Device 1 Status" in device_sensor.name
-
-    def test_device_info(self, device_sensor, mock_coordinator):
-        """Test device info property."""
-        device_info = device_sensor.device_info
-        
-        assert isinstance(device_info, DeviceInfo)
-        # DeviceInfo should be created from the dict returned by coordinator
-        mock_coordinator.get_device_info_dict.assert_called()
-
-    def test_native_value_online(self, device_sensor, mock_coordinator, mock_devices_data):
-        """Test native value for online device."""
-        device_data = mock_devices_data["aa:bb:cc:dd:ee:ff"]
-        device_data["online"] = True
-        mock_coordinator.get_device_by_mac.return_value = device_data
-        
-        assert device_sensor.native_value == "online"
-
-    def test_native_value_offline(self, device_sensor, mock_coordinator, mock_devices_data):
-        """Test native value for offline device."""
-        device_data = mock_devices_data["aa:bb:cc:dd:ee:ff"]
-        device_data["online"] = False
-        mock_coordinator.get_device_by_mac.return_value = device_data
-        
-        assert device_sensor.native_value == "offline"
-
-    def test_native_value_device_not_found(self, device_sensor, mock_coordinator):
-        """Test native value when device not found."""
-        mock_coordinator.get_device_by_mac.return_value = None
-        
-        assert device_sensor.native_value == "unknown"
-
-    def test_available_success(self, device_sensor, mock_coordinator):
-        """Test available property when coordinator has data."""
-        mock_coordinator.last_update_success = True
-        mock_coordinator.get_device_by_mac.return_value = {"online": True}
-        
-        assert device_sensor.available is True
-
-    def test_available_no_update(self, device_sensor, mock_coordinator):
-        """Test available property when coordinator update failed."""
-        mock_coordinator.last_update_success = False
-        
-        assert device_sensor.available is False
-
-    def test_available_device_missing(self, device_sensor, mock_coordinator):
-        """Test available property when device is missing."""
-        mock_coordinator.last_update_success = True
-        mock_coordinator.get_device_by_mac.return_value = None
-        
-        assert device_sensor.available is False
-
-    def test_extra_state_attributes(self, device_sensor, mock_coordinator, mock_devices_data):
-        """Test extra state attributes."""
-        device_data = mock_devices_data["aa:bb:cc:dd:ee:ff"]
-        mock_coordinator.get_device_by_mac.return_value = device_data
-        
-        attributes = device_sensor.extra_state_attributes
-        
-        assert attributes["mac_address"] == "aa:bb:cc:dd:ee:ff"
-        assert attributes["device_name"] == "Test Device 1"
-        assert attributes["ip_address"] == "192.168.1.100"
-        assert attributes["device_class"] == "laptop"
-        assert "last_seen" in attributes
-
-    def test_extra_state_attributes_with_timestamp(self, device_sensor, mock_coordinator, mock_devices_data):
-        """Test extra state attributes with timestamp conversion."""
-        device_data = mock_devices_data["aa:bb:cc:dd:ee:ff"]
-        device_data["lastActiveTimestamp"] = 1648632679.193
-        mock_coordinator.get_device_by_mac.return_value = device_data
-        
-        attributes = device_sensor.extra_state_attributes
-        
-        assert "last_seen" in attributes
-        # Should be ISO format datetime string
-        assert "T" in attributes["last_seen"]
-
-    def test_extra_state_attributes_with_millisecond_timestamp(self, device_sensor, mock_coordinator, mock_devices_data):
-        """Test extra state attributes with millisecond timestamp."""
-        device_data = mock_devices_data["aa:bb:cc:dd:ee:ff"]
-        device_data["lastActiveTimestamp"] = 1648632679193  # Milliseconds
-        mock_coordinator.get_device_by_mac.return_value = device_data
-        
-        attributes = device_sensor.extra_state_attributes
-        
-        assert "last_seen" in attributes
-        # Should be converted to seconds and formatted
-        assert "T" in attributes["last_seen"]
-
-    def test_extra_state_attributes_device_not_found(self, device_sensor, mock_coordinator):
-        """Test extra state attributes when device not found."""
-        mock_coordinator.get_device_by_mac.return_value = None
-        
-        attributes = device_sensor.extra_state_attributes
-        
-        assert attributes == {}
-
-    def test_icon_online(self, device_sensor, mock_coordinator, mock_devices_data):
-        """Test icon for online device."""
-        device_data = mock_devices_data["aa:bb:cc:dd:ee:ff"]
-        device_data["online"] = True
-        mock_coordinator.get_device_by_mac.return_value = device_data
-        
-        assert device_sensor.icon == "mdi:check-network"
-
-    def test_icon_offline(self, device_sensor, mock_coordinator, mock_devices_data):
-        """Test icon for offline device."""
-        device_data = mock_devices_data["aa:bb:cc:dd:ee:ff"]
-        device_data["online"] = False
-        mock_coordinator.get_device_by_mac.return_value = device_data
-        
-        assert device_sensor.icon == "mdi:close-network"
-
-    def test_icon_device_not_found(self, device_sensor, mock_coordinator):
-        """Test icon when device not found."""
-        mock_coordinator.get_device_by_mac.return_value = None
-        
-        assert device_sensor.icon == "mdi:help-network"
+@pytest.fixture
+def mock_config_entry():
+    """Create a mock config entry."""
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    return entry
 
 
 class TestFirewallaRulesSensor:
-    """Test Firewalla rules count sensor entity."""
+    """Test Firewalla rules summary sensor entity."""
 
-    @pytest.fixture
-    def mock_coordinator(self, mock_coordinator_data):
-        """Create a mock coordinator."""
-        coordinator = MagicMock()
-        coordinator.data = mock_coordinator_data
-        coordinator.rules = mock_coordinator_data["rules"]
-        coordinator.box_info = mock_coordinator_data["box_info"]
-        coordinator.box_gid = "test_box_gid_456"
-        coordinator.last_update_success = True
-        coordinator.last_update_success_time = datetime.fromisoformat("2024-01-01T14:00:00")
-        return coordinator
-
-    @pytest.fixture
-    def rules_sensor(self, mock_coordinator):
-        """Create a rules count sensor entity."""
-        return FirewallaRulesSensor(mock_coordinator)
-
-    def test_unique_id(self, rules_sensor):
-        """Test rules sensor unique ID."""
-        assert rules_sensor.unique_id == "firewalla_rules_active"
-
-    def test_name(self, rules_sensor):
-        """Test rules sensor name."""
-        assert rules_sensor.name == "Firewalla Active Rules"
-
-    def test_device_info(self, rules_sensor, mock_coordinator):
-        """Test device info for rules sensor."""
-        device_info = rules_sensor.device_info
+    def test_init(self, mock_coordinator):
+        """Test sensor initialization."""
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert isinstance(device_info, DeviceInfo)
-        assert device_info.name == "Test Firewalla Gold"
-        assert device_info.manufacturer == "Firewalla"
-        assert device_info.model == "Gold"
-        assert device_info.sw_version == "1.975"
+        assert sensor.unique_id == ENTITY_ID_FORMATS["rules_sensor"]
+        assert sensor.name == "Firewalla Rules Summary"
+        assert sensor.native_unit_of_measurement == "rules"
 
-    def test_native_value_active_rules(self, rules_sensor, mock_coordinator, mock_rules_data):
-        """Test native value counting active rules."""
-        # Mock rules: rule_123 is active, rule_456 is paused
-        mock_coordinator.rules = mock_rules_data
+    def test_native_value_with_data(self, mock_coordinator):
+        """Test native value with rule count data."""
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        # Only rule_123 should be counted as active (not paused, not disabled)
-        assert rules_sensor.native_value == 1
+        assert sensor.native_value == 3  # Total rules
 
-    def test_native_value_no_rules(self, rules_sensor, mock_coordinator):
-        """Test native value with no rules."""
-        mock_coordinator.rules = {}
+    def test_native_value_no_data(self, mock_coordinator):
+        """Test native value with no data."""
+        mock_coordinator.data = None
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert rules_sensor.native_value == 0
+        assert sensor.native_value == 0
 
-    def test_native_value_all_paused_disabled(self, rules_sensor, mock_coordinator):
-        """Test native value with all rules paused or disabled."""
-        mock_coordinator.rules = {
-            "rule_1": {"disabled": True, "paused": False},
-            "rule_2": {"disabled": False, "paused": True},
-            "rule_3": {"disabled": True, "paused": True},
-        }
+    def test_native_value_no_rule_count(self, mock_coordinator):
+        """Test native value with no rule count data."""
+        mock_coordinator.data = {"rules": {}}
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert rules_sensor.native_value == 0
+        assert sensor.native_value == 0
 
-    def test_native_value_mixed_rules(self, rules_sensor, mock_coordinator):
-        """Test native value with mixed rule states."""
-        mock_coordinator.rules = {
-            "rule_1": {"disabled": False, "paused": False},  # Active
-            "rule_2": {"disabled": False, "paused": False},  # Active
-            "rule_3": {"disabled": True, "paused": False},   # Disabled
-            "rule_4": {"disabled": False, "paused": True},   # Paused
-        }
+    def test_available_success(self, mock_coordinator):
+        """Test available property when coordinator has successful data."""
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert rules_sensor.native_value == 2
+        assert sensor.available is True
 
-    def test_native_value_invalid_rules(self, rules_sensor, mock_coordinator):
-        """Test native value with some invalid rule data."""
-        mock_coordinator.rules = {
-            "rule_1": {"disabled": False, "paused": False},  # Valid active rule
-            "rule_2": "invalid_string",  # Invalid rule data
-            "rule_3": {"disabled": False, "paused": False},  # Valid active rule
-        }
-        
-        # Should count only valid active rules
-        assert rules_sensor.native_value == 2
-
-    def test_available_success(self, rules_sensor, mock_coordinator):
-        """Test available property when coordinator has data."""
-        mock_coordinator.last_update_success = True
-        
-        assert rules_sensor.available is True
-
-    def test_available_no_update(self, rules_sensor, mock_coordinator):
-        """Test available property when coordinator update failed."""
+    def test_available_failure(self, mock_coordinator):
+        """Test available property when coordinator has failed."""
         mock_coordinator.last_update_success = False
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert rules_sensor.available is False
+        assert sensor.available is False
 
-    def test_extra_state_attributes(self, rules_sensor, mock_coordinator):
-        """Test extra state attributes."""
-        mock_coordinator.rules = {
-            "rule_1": {"disabled": False, "paused": False},  # Active
-            "rule_2": {"disabled": False, "paused": True},   # Paused
-            "rule_3": {"disabled": True, "paused": False},   # Disabled
-        }
+    def test_extra_state_attributes_with_data(self, mock_coordinator):
+        """Test extra state attributes with full data."""
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        attributes = rules_sensor.extra_state_attributes
+        attributes = sensor.extra_state_attributes
         
         assert attributes["total_rules"] == 3
         assert attributes["active_rules"] == 1
         assert attributes["paused_rules"] == 1
-        assert attributes["disabled_rules"] == 1
-        assert "last_updated" in attributes
+        assert attributes["by_type"]["internet"] == 1
+        assert attributes["by_type"]["category"] == 1
+        assert attributes["by_type"]["domain"] == 1
+        assert attributes["last_updated"] == "2023-01-01T12:00:00"
+        assert attributes["api_status"] == "connected"
+        assert attributes["box_name"] == "Firewalla Gold"
+        assert attributes["box_model"] == "gold"
+        assert attributes["box_online"] is True
 
-    def test_extra_state_attributes_no_rules(self, rules_sensor, mock_coordinator):
-        """Test extra state attributes with no rules."""
-        mock_coordinator.rules = {}
+    def test_extra_state_attributes_no_data(self, mock_coordinator):
+        """Test extra state attributes with no data."""
+        mock_coordinator.data = None
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        attributes = rules_sensor.extra_state_attributes
+        attributes = sensor.extra_state_attributes
         
-        assert attributes["total_rules"] == 0
-        assert attributes["active_rules"] == 0
-        assert attributes["paused_rules"] == 0
-        assert attributes["disabled_rules"] == 0
+        assert attributes["status"] == "No data available"
 
-    def test_extra_state_attributes_with_timestamp(self, rules_sensor, mock_coordinator):
-        """Test extra state attributes with last update timestamp."""
-        mock_coordinator.rules = {}
+    def test_extra_state_attributes_disconnected(self, mock_coordinator):
+        """Test extra state attributes when disconnected."""
+        mock_coordinator.last_update_success = False
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        attributes = rules_sensor.extra_state_attributes
+        attributes = sensor.extra_state_attributes
         
-        assert "last_updated" in attributes
-        assert "T" in attributes["last_updated"]  # ISO format
+        assert attributes["api_status"] == "disconnected"
 
-    def test_icon_no_rules(self, rules_sensor, mock_coordinator):
+    def test_extra_state_attributes_with_changes(self, mock_coordinator):
+        """Test extra state attributes with rule changes."""
+        mock_coordinator.data["rule_changes"] = {
+            "added": ["rule-new"],
+            "removed": ["rule-old"],
+            "modified": ["rule-123", "rule-456"],
+        }
+        
+        sensor = FirewallaRulesSensor(mock_coordinator)
+        
+        attributes = sensor.extra_state_attributes
+        
+        assert "recent_changes" in attributes
+        assert attributes["recent_changes"]["added"] == 1
+        assert attributes["recent_changes"]["removed"] == 1
+        assert attributes["recent_changes"]["modified"] == 2
+
+    def test_icon_no_data(self, mock_coordinator):
+        """Test icon with no data."""
+        mock_coordinator.data = None
+        sensor = FirewallaRulesSensor(mock_coordinator)
+        
+        assert sensor.icon == "mdi:shield-outline"
+
+    def test_icon_no_rules(self, mock_coordinator):
+        """Test icon with no rules."""
+        mock_coordinator.data = {"rule_count": {"total": 0, "active": 0}}
+        sensor = FirewallaRulesSensor(mock_coordinator)
+        
+        assert sensor.icon == "mdi:shield-outline"
+
+    def test_icon_no_active_rules(self, mock_coordinator):
         """Test icon with no active rules."""
-        mock_coordinator.rules = {}
+        mock_coordinator.data = {"rule_count": {"total": 5, "active": 0}}
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert rules_sensor.icon == "mdi:shield-outline"
+        assert sensor.icon == "mdi:shield-off"
 
-    def test_icon_few_rules(self, rules_sensor, mock_coordinator):
+    def test_icon_few_active_rules(self, mock_coordinator):
         """Test icon with few active rules."""
-        mock_coordinator.rules = {
-            "rule_1": {"disabled": False, "paused": False},
-            "rule_2": {"disabled": False, "paused": False},
-        }
+        mock_coordinator.data = {"rule_count": {"total": 10, "active": 3}}
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert rules_sensor.icon == "mdi:shield-check"
+        assert sensor.icon == "mdi:shield-check"
 
-    def test_icon_many_rules(self, rules_sensor, mock_coordinator):
+    def test_icon_many_active_rules(self, mock_coordinator):
         """Test icon with many active rules."""
-        mock_coordinator.rules = {
-            f"rule_{i}": {"disabled": False, "paused": False}
-            for i in range(6)  # 6 active rules (>= 5)
-        }
+        mock_coordinator.data = {"rule_count": {"total": 10, "active": 8}}
+        sensor = FirewallaRulesSensor(mock_coordinator)
         
-        assert rules_sensor.icon == "mdi:shield-alert"
+        assert sensor.icon == "mdi:shield"
+
+    def test_device_info(self, mock_coordinator):
+        """Test device info generation."""
+        sensor = FirewallaRulesSensor(mock_coordinator)
+        
+        device_info = sensor._get_device_info()
+        
+        assert device_info["identifiers"] == {(DOMAIN, "box-123")}
+        assert device_info["name"] == "Firewalla Gold"
+        assert device_info["manufacturer"] == "Firewalla"
+        assert device_info["model"] == "Firewalla Gold"
+        assert device_info["sw_version"] == "1.975"
+
+    def test_device_info_unknown_model(self, mock_coordinator):
+        """Test device info with unknown model."""
+        mock_coordinator.data["box_info"]["model"] = "unknown"
+        sensor = FirewallaRulesSensor(mock_coordinator)
+        
+        device_info = sensor._get_device_info()
+        
+        assert device_info["model"] == "Firewalla Unknown"
+
+
+class TestAsyncSetupEntry:
+    """Test async_setup_entry function."""
+
+    @pytest.mark.asyncio
+    async def test_async_setup_entry_success(self, mock_hass, mock_config_entry, mock_coordinator):
+        """Test successful setup of sensor entities."""
+        mock_hass.data[DOMAIN][mock_config_entry.entry_id] = mock_coordinator
+        
+        async_add_entities = AsyncMock()
+        
+        await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
+        
+        # Should be called with list containing one sensor entity
+        async_add_entities.assert_called_once()
+        entities = async_add_entities.call_args[0][0]
+        
+        assert len(entities) == 1
+        assert isinstance(entities[0], FirewallaRulesSensor)
+
+    @pytest.mark.asyncio
+    async def test_async_setup_entry_missing_coordinator(self, mock_hass, mock_config_entry):
+        """Test setup with missing coordinator."""
+        # Don't add coordinator to hass.data
+        
+        async_add_entities = AsyncMock()
+        
+        with pytest.raises(HomeAssistantError, match="Coordinator not found"):
+            await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
+
+    @pytest.mark.asyncio
+    async def test_async_setup_entry_sensor_creation_error(self, mock_hass, mock_config_entry, mock_coordinator):
+        """Test setup when sensor creation fails."""
+        mock_hass.data[DOMAIN][mock_config_entry.entry_id] = mock_coordinator
+        
+        async_add_entities = AsyncMock()
+        
+        # Mock FirewallaRulesSensor to raise an exception
+        with patch('custom_components.firewalla.sensor.FirewallaRulesSensor', side_effect=Exception("Test error")):
+            await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
+        
+        # Should still be called with empty list
+        async_add_entities.assert_called_once_with([], True)

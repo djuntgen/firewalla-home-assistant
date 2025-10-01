@@ -14,9 +14,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     API_ENDPOINTS,
     API_TIMEOUT,
+    AUTH_HEADER_FORMAT,
+    CONTENT_TYPE,
     DOMAIN,
+    MSP_API_V2_BASE,
     RETRY_ATTEMPTS,
-    RETRY_BACKOFF_FACTOR,
+    RETRY_DELAYS,
     UPDATE_INTERVAL,
 )
 
@@ -24,18 +27,28 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class FirewallaMSPClient:
-    """Client for Firewalla MSP API communication."""
+    """Client for Firewalla MSP API communication focused on rule management."""
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        msp_url: str,
+        msp_domain: str,
         access_token: str,
     ) -> None:
         """Initialize the MSP API client."""
         self._session = session
-        self._msp_url = msp_url.rstrip("/")
         self._access_token = access_token
+        
+        # Parse MSP domain to handle both formats: 
+        # - mydomain.firewalla.net
+        # - https://mydomain.firewalla.net
+        parsed_domain = msp_domain.rstrip("/")
+        if parsed_domain.startswith(("http://", "https://")):
+            # Extract domain from full URL
+            parsed_domain = parsed_domain.split("://", 1)[1]
+        
+        self._msp_domain = parsed_domain
+        self._base_url = MSP_API_V2_BASE.format(domain=self._msp_domain)
         self._authenticated = False
         self._auth_lock = asyncio.Lock()
 
@@ -43,52 +56,20 @@ class FirewallaMSPClient:
         """Authenticate with the MSP API and validate the token."""
         try:
             _LOGGER.debug("Attempting MSP API authentication")
-            # Test authentication by fetching boxes list
-            response = await self._make_request("GET", API_ENDPOINTS["boxes"], retry_auth=False)
-            if response and isinstance(response, list):
+            # Test authentication by fetching rules list
+            response = await self._make_request("GET", API_ENDPOINTS["rules"], retry_auth=False)
+            if response is not None:
                 self._authenticated = True
-                _LOGGER.info("MSP API authentication successful, found %d boxes", len(response))
+                _LOGGER.info("MSP API authentication successful")
                 return True
             else:
-                _LOGGER.error("MSP API authentication failed: Invalid response format - %s", response)
+                _LOGGER.error("MSP API authentication failed: Invalid response")
                 return False
         except ConfigEntryAuthFailed as err:
-            _LOGGER.error("MSP API authentication failed: Invalid credentials - %s", err)
-            return False
-        except aiohttp.ClientConnectorError as err:
-            _LOGGER.error("MSP API authentication failed: Cannot connect to server - %s", err)
-            return False
-        except aiohttp.ClientResponseError as err:
-            _LOGGER.error("MSP API authentication failed: HTTP %d - %s", err.status, err.message)
+            _LOGGER.error("MSP API authentication failed: %s", err)
             return False
         except Exception as err:
             _LOGGER.exception("MSP API authentication failed with unexpected error: %s", err)
-            return False
-
-    async def _refresh_authentication(self) -> bool:
-        """Refresh authentication by re-validating the current token."""
-        try:
-            _LOGGER.debug("Attempting MSP API token refresh")
-            # Reset authentication state
-            self._authenticated = False
-            
-            # Test the current token by making a simple API call
-            response = await self._make_request("GET", API_ENDPOINTS["boxes"], retry_auth=False)
-            if response and isinstance(response, list):
-                self._authenticated = True
-                _LOGGER.info("MSP API token refresh successful")
-                return True
-            else:
-                _LOGGER.error("MSP API token refresh failed: Invalid response format - %s", response)
-                return False
-        except ConfigEntryAuthFailed as err:
-            _LOGGER.error("MSP API token refresh failed: Authentication error - %s", err)
-            return False
-        except aiohttp.ClientError as err:
-            _LOGGER.error("MSP API token refresh failed: Network error - %s", err)
-            return False
-        except Exception as err:
-            _LOGGER.exception("MSP API token refresh failed with unexpected error: %s", err)
             return False
 
     async def _make_request(
@@ -98,12 +79,12 @@ class FirewallaMSPClient:
         data: Optional[Dict[str, Any]] = None,
         retry_auth: bool = True,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> Dict[str, Any] | list | None:
         """Make an authenticated request to the MSP API with retry logic."""
-        url = f"{self._msp_url}/v2{endpoint}"
+        url = f"{self._base_url}{endpoint}"
         headers = {
-            "Authorization": f"Token {self._access_token}",
-            "Content-Type": "application/json",
+            "Authorization": AUTH_HEADER_FORMAT.format(token=self._access_token),
+            "Content-Type": CONTENT_TYPE,
         }
 
         for attempt in range(RETRY_ATTEMPTS):
@@ -130,29 +111,24 @@ class FirewallaMSPClient:
                     # Handle authentication errors
                     if response.status == 401:
                         if retry_auth:
-                            _LOGGER.warning("MSP API authentication expired (HTTP 401), attempting refresh")
-                            async with self._auth_lock:
-                                if await self._refresh_authentication():
-                                    # Update headers with refreshed token and retry
-                                    headers["Authorization"] = f"Token {self._access_token}"
-                                    _LOGGER.debug("Token refreshed, retrying request")
-                                    continue
-                                else:
-                                    _LOGGER.error("MSP API authentication refresh failed")
-                                    raise ConfigEntryAuthFailed("MSP API authentication refresh failed")
+                            _LOGGER.warning("MSP API authentication expired (HTTP 401)")
+                            raise ConfigEntryAuthFailed("MSP API authentication expired")
                         else:
                             _LOGGER.error("MSP API authentication failed (HTTP 401)")
                             raise ConfigEntryAuthFailed("MSP API authentication failed")
                     
                     # Handle rate limiting
                     if response.status == 429:
-                        wait_time = RETRY_BACKOFF_FACTOR ** attempt
-                        _LOGGER.warning(
-                            "MSP API rate limited (HTTP 429), waiting %d seconds before retry (attempt %d/%d)",
-                            wait_time, attempt + 1, RETRY_ATTEMPTS
-                        )
-                        await asyncio.sleep(wait_time)
-                        continue
+                        if attempt < RETRY_ATTEMPTS - 1:
+                            wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                            _LOGGER.warning(
+                                "MSP API rate limited (HTTP 429), waiting %d seconds before retry",
+                                wait_time
+                            )
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            raise HomeAssistantError("MSP API rate limit exceeded")
                     
                     # Handle other HTTP errors
                     if response.status >= 400:
@@ -163,9 +139,9 @@ class FirewallaMSPClient:
                         )
                         
                         if response.status == 403:
-                            raise ConfigEntryAuthFailed(f"MSP API access forbidden (HTTP 403): {error_text}")
+                            raise ConfigEntryAuthFailed(f"MSP API access forbidden: {error_text}")
                         elif response.status == 404:
-                            raise HomeAssistantError(f"MSP API endpoint not found (HTTP 404): {url}")
+                            raise HomeAssistantError(f"MSP API endpoint not found: {url}")
                         elif response.status >= 500:
                             raise HomeAssistantError(f"MSP API server error (HTTP {response.status}): {error_text}")
                         else:
@@ -174,140 +150,83 @@ class FirewallaMSPClient:
                     # Success - parse response
                     try:
                         result = await response.json()
-                        _LOGGER.debug("MSP API response received: %d bytes", len(str(result)))
+                        _LOGGER.debug("MSP API response received successfully")
                         return result
-                    except aiohttp.ContentTypeError as err:
-                        # Handle non-JSON responses
-                        text = await response.text()
-                        _LOGGER.debug("MSP API non-JSON response: %s", text[:200])
+                    except aiohttp.ContentTypeError:
+                        # Handle non-JSON responses (e.g., for pause/unpause operations)
                         if response.status == 200:
-                            return {"success": True, "data": text}
+                            return {"success": True}
                         else:
+                            text = await response.text()
                             _LOGGER.error("MSP API returned non-JSON error response: %s", text)
-                            raise HomeAssistantError(f"MSP API returned invalid response format: {err}")
+                            raise HomeAssistantError(f"MSP API returned invalid response format")
 
-            except asyncio.TimeoutError as err:
-                _LOGGER.warning(
-                    "MSP API timeout on attempt %d/%d for %s %s: %s",
-                    attempt + 1,
-                    RETRY_ATTEMPTS,
-                    method,
-                    url,
-                    err,
-                )
-                if attempt == RETRY_ATTEMPTS - 1:
-                    _LOGGER.error("MSP API timeout after %d attempts for %s %s", RETRY_ATTEMPTS, method, url)
+            except asyncio.TimeoutError:
+                if attempt < RETRY_ATTEMPTS - 1:
+                    wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                    _LOGGER.warning(
+                        "MSP API timeout on attempt %d/%d, waiting %d seconds before retry",
+                        attempt + 1, RETRY_ATTEMPTS, wait_time
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    _LOGGER.error("MSP API timeout after %d attempts", RETRY_ATTEMPTS)
                     raise HomeAssistantError(f"MSP API timeout after {RETRY_ATTEMPTS} attempts")
-                
-                # Exponential backoff
-                wait_time = RETRY_BACKOFF_FACTOR ** attempt
-                _LOGGER.debug("Waiting %d seconds before retry due to timeout", wait_time)
-                await asyncio.sleep(wait_time)
 
             except aiohttp.ClientConnectorError as err:
-                _LOGGER.warning(
-                    "MSP API connection error on attempt %d/%d for %s %s: %s",
-                    attempt + 1,
-                    RETRY_ATTEMPTS,
-                    method,
-                    url,
-                    err,
-                )
-                if attempt == RETRY_ATTEMPTS - 1:
+                if attempt < RETRY_ATTEMPTS - 1:
+                    wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                    _LOGGER.warning(
+                        "MSP API connection error on attempt %d/%d: %s, waiting %d seconds before retry",
+                        attempt + 1, RETRY_ATTEMPTS, err, wait_time
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
                     _LOGGER.error("MSP API connection failed after %d attempts: %s", RETRY_ATTEMPTS, err)
                     raise HomeAssistantError(f"Cannot connect to MSP API: {err}")
-                
-                # Exponential backoff
-                wait_time = RETRY_BACKOFF_FACTOR ** attempt
-                _LOGGER.debug("Waiting %d seconds before retry due to connection error", wait_time)
-                await asyncio.sleep(wait_time)
-
-            except aiohttp.ClientError as err:
-                _LOGGER.warning(
-                    "MSP API client error on attempt %d/%d for %s %s: %s",
-                    attempt + 1,
-                    RETRY_ATTEMPTS,
-                    method,
-                    url,
-                    err,
-                )
-                if attempt == RETRY_ATTEMPTS - 1:
-                    _LOGGER.error("MSP API client error after %d attempts: %s", RETRY_ATTEMPTS, err)
-                    raise HomeAssistantError(f"MSP API client error: {err}")
-                
-                # Exponential backoff
-                wait_time = RETRY_BACKOFF_FACTOR ** attempt
-                _LOGGER.debug("Waiting %d seconds before retry due to client error", wait_time)
-                await asyncio.sleep(wait_time)
 
             except (ConfigEntryAuthFailed, HomeAssistantError):
                 # Don't retry authentication failures or other Home Assistant errors
                 raise
 
             except Exception as err:
-                _LOGGER.error(
-                    "Unexpected MSP API error on attempt %d/%d for %s %s: %s",
-                    attempt + 1,
-                    RETRY_ATTEMPTS,
-                    method,
-                    url,
-                    err,
-                )
-                if attempt == RETRY_ATTEMPTS - 1:
+                if attempt < RETRY_ATTEMPTS - 1:
+                    wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                    _LOGGER.warning(
+                        "Unexpected MSP API error on attempt %d/%d: %s, waiting %d seconds before retry",
+                        attempt + 1, RETRY_ATTEMPTS, err, wait_time
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
                     _LOGGER.exception("Unexpected MSP API error after %d attempts", RETRY_ATTEMPTS)
                     raise HomeAssistantError(f"Unexpected MSP API error: {err}")
-                
-                # Exponential backoff
-                wait_time = RETRY_BACKOFF_FACTOR ** attempt
-                _LOGGER.debug("Waiting %d seconds before retry due to unexpected error", wait_time)
-                await asyncio.sleep(wait_time)
 
-        _LOGGER.error("MSP API request failed after all %d retry attempts for %s %s", RETRY_ATTEMPTS, method, url)
         raise HomeAssistantError(f"MSP API request failed after {RETRY_ATTEMPTS} attempts")
 
-    async def get_boxes(self) -> Dict[str, Any]:
-        """Get list of available Firewalla boxes."""
-        return await self._make_request("GET", API_ENDPOINTS["boxes"])
-
-    async def get_box_info(self, box_gid: str) -> Dict[str, Any]:
-        """Get information about a specific Firewalla box."""
-        endpoint = API_ENDPOINTS["box_info"].format(gid=box_gid)
-        return await self._make_request("GET", endpoint)
-
-    async def get_devices(self, box_gid: Optional[str] = None) -> Dict[str, Any]:
-        """Get devices from MSP API (returns all devices across all boxes)."""
-        return await self._make_request("GET", API_ENDPOINTS["devices"])
-
-    async def get_rules(self, box_gid: Optional[str] = None, query: Optional[str] = None) -> Dict[str, Any]:
+    async def get_rules(self, query: Optional[str] = None) -> Dict[str, Any] | list:
         """Get rules from MSP API with optional query parameters."""
         endpoint = API_ENDPOINTS["rules"]
-        params = {}
         if query:
-            params["query"] = query
-        if box_gid:
-            params["gid"] = box_gid
-        
-        if params:
-            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-            endpoint += f"?{query_string}"
+            endpoint += f"?query={query}"
         return await self._make_request("GET", endpoint)
 
-    async def create_rule(self, box_gid: str, rule_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new rule via MSP API."""
-        # Add box_gid to rule data if not present
-        if "gid" not in rule_data and box_gid:
-            rule_data["gid"] = box_gid
-        return await self._make_request("POST", API_ENDPOINTS["create_rule"], data=rule_data)
-
-    async def pause_rule(self, box_gid: str, rule_id: str) -> Dict[str, Any]:
+    async def pause_rule(self, rule_id: str) -> Dict[str, Any]:
         """Pause a rule via MSP API."""
-        endpoint = API_ENDPOINTS["pause_rule"].format(rid=rule_id)
+        endpoint = API_ENDPOINTS["rule_pause"].format(rule_id=rule_id)
         return await self._make_request("POST", endpoint)
 
-    async def unpause_rule(self, box_gid: str, rule_id: str) -> Dict[str, Any]:
+    async def unpause_rule(self, rule_id: str) -> Dict[str, Any]:
         """Unpause a rule via MSP API."""
-        endpoint = API_ENDPOINTS["unpause_rule"].format(rid=rule_id)
+        endpoint = API_ENDPOINTS["rule_unpause"].format(rule_id=rule_id)
         return await self._make_request("POST", endpoint)
+
+    async def get_rule_status(self, rule_id: str) -> Dict[str, Any]:
+        """Get individual rule status for verification."""
+        endpoint = API_ENDPOINTS["rule_detail"].format(rule_id=rule_id)
+        return await self._make_request("GET", endpoint)
 
     @property
     def is_authenticated(self) -> bool:
@@ -316,19 +235,24 @@ class FirewallaMSPClient:
 
 
 class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching data from the Firewalla MSP API."""
+    """Class to manage fetching rule data from the Firewalla MSP API."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         session: aiohttp.ClientSession,
-        msp_url: str,
+        msp_domain: str,
         access_token: str,
         box_gid: str,
+        include_filters: Optional[list] = None,
+        exclude_filters: Optional[list] = None,
     ) -> None:
         """Initialize the coordinator."""
-        self.api = FirewallaMSPClient(session, msp_url, access_token)
+        self.api = FirewallaMSPClient(session, msp_domain, access_token)
         self.box_gid = box_gid
+        self._previous_rules = {}
+        self.include_filters = include_filters or []
+        self.exclude_filters = exclude_filters or []
         
         super().__init__(
             hass,
@@ -338,7 +262,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self) -> Dict[str, Any]:
-        """Fetch data from MSP API with automatic token refresh."""
+        """Fetch rule data from MSP API with automatic rule change detection."""
         _LOGGER.debug("Starting MSP API data update for box %s", self.box_gid)
         
         try:
@@ -349,60 +273,41 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.error("MSP API authentication failed during data update")
                     raise ConfigEntryAuthFailed("MSP API authentication failed")
 
-            # Fetch all required data concurrently for better performance
-            _LOGGER.debug("Fetching data from MSP API endpoints concurrently")
-            try:
-                box_info_task = self.api.get_box_info(self.box_gid)
-                devices_task = self.api.get_devices(self.box_gid)
-                rules_task = self.api.get_rules(self.box_gid)
-                
-                box_info, devices, rules = await asyncio.gather(
-                    box_info_task, devices_task, rules_task, return_exceptions=True
-                )
-                
-                # Check for exceptions in the results
-                if isinstance(box_info, Exception):
-                    _LOGGER.error("Failed to fetch box info: %s", box_info)
-                    raise box_info
-                if isinstance(devices, Exception):
-                    _LOGGER.error("Failed to fetch devices: %s", devices)
-                    raise devices
-                if isinstance(rules, Exception):
-                    _LOGGER.error("Failed to fetch rules: %s", rules)
-                    raise rules
-                
-                # Validate API responses - MSP API returns arrays directly
-                if not isinstance(devices, list):
-                    _LOGGER.error("Invalid devices response format: %s", type(devices))
-                    raise UpdateFailed("Invalid devices response from MSP API")
-                
-                if not isinstance(rules, list):
-                    _LOGGER.error("Invalid rules response format: %s", type(rules))
-                    raise UpdateFailed("Invalid rules response from MSP API")
-                
-                # Process and structure the data
-                box_data = box_info if isinstance(box_info, dict) else {}
-                devices_data = self._process_devices_data(devices)
-                rules_data = self._process_rules_data(rules)
-                
-                processed_data = {
-                    "box_info": box_data,
-                    "devices": devices_data,
-                    "rules": rules_data,
-                    "last_updated": self.last_update_success,
+            # Fetch rules with filters applied
+            _LOGGER.debug("Fetching rules from MSP API with filters")
+            rules_response = await self._fetch_filtered_rules()
+            
+            # Process rules data
+            rules_data = self._process_rules_data(rules_response)
+            
+            # Detect rule changes
+            rule_changes = self._detect_rule_changes(rules_data)
+            
+            # Calculate rule statistics
+            rule_stats = self._calculate_rule_statistics(rules_data)
+            
+            processed_data = {
+                "rules": rules_data,
+                "rule_count": rule_stats,
+                "rule_changes": rule_changes,
+                "last_updated": self.last_update_success,
+                "box_info": {
+                    "gid": self.box_gid,
+                    "name": f"Firewalla Box {self.box_gid[:8]}",
+                    "online": True,  # Assume online if we can fetch data
                 }
-                
-                _LOGGER.debug(
-                    "Successfully updated data from MSP API: %d devices, %d rules",
-                    len(devices_data),
-                    len(rules_data)
-                )
-                return processed_data
-
-            except ConfigEntryAuthFailed:
-                # Authentication failed during data fetch
-                _LOGGER.error("Authentication failed during data update")
-                raise
+            }
+            
+            # Update previous rules for next comparison
+            self._previous_rules = rules_data.copy()
+            
+            _LOGGER.debug(
+                "Successfully updated rule data from MSP API: %d rules (%d active, %d paused)",
+                rule_stats["total"],
+                rule_stats["active"], 
+                rule_stats["paused"]
+            )
+            return processed_data
 
         except ConfigEntryAuthFailed:
             # Re-raise authentication errors without wrapping
@@ -417,63 +322,108 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.exception("Unexpected error during MSP API data update: %s", err)
             raise UpdateFailed(f"Unexpected error communicating with MSP API: {err}") from err
 
-    def _process_devices_data(self, devices_data: list) -> Dict[str, Any]:
-        """Process and normalize devices data from the MSP API."""
-        if not isinstance(devices_data, list):
-            _LOGGER.warning("Invalid devices data format received from API: %s", type(devices_data))
+    async def _fetch_filtered_rules(self) -> Dict[str, Any]:
+        """Fetch rules with include/exclude filters applied."""
+        all_rules = {"results": [], "count": 0}
+        
+        # If no filters are specified, fetch all rules
+        if not self.include_filters and not self.exclude_filters:
+            _LOGGER.debug("No filters specified, fetching all rules")
+            return await self.api.get_rules()
+        
+        # Apply include filters
+        if self.include_filters:
+            _LOGGER.debug("Applying %d include filters", len(self.include_filters))
+            for filter_query in self.include_filters:
+                try:
+                    _LOGGER.debug("Fetching rules with include filter: %s", filter_query)
+                    filtered_response = await self.api.get_rules(filter_query)
+                    
+                    if isinstance(filtered_response, dict) and "results" in filtered_response:
+                        # Merge results, avoiding duplicates by rule ID
+                        existing_ids = {rule["id"] for rule in all_rules["results"]}
+                        for rule in filtered_response["results"]:
+                            if rule["id"] not in existing_ids:
+                                all_rules["results"].append(rule)
+                                existing_ids.add(rule["id"])
+                    
+                except Exception as err:
+                    _LOGGER.warning("Failed to apply include filter '%s': %s", filter_query, err)
+                    continue
+        else:
+            # No include filters, start with all rules
+            _LOGGER.debug("No include filters, starting with all rules")
+            all_rules = await self.api.get_rules()
+        
+        # Apply exclude filters
+        if self.exclude_filters:
+            _LOGGER.debug("Applying %d exclude filters", len(self.exclude_filters))
+            rules_to_exclude = set()
+            
+            for filter_query in self.exclude_filters:
+                try:
+                    # Remove the '-' prefix if present (it's handled by the query logic)
+                    clean_query = filter_query.lstrip('-')
+                    _LOGGER.debug("Fetching rules to exclude with filter: %s", clean_query)
+                    
+                    exclude_response = await self.api.get_rules(clean_query)
+                    
+                    if isinstance(exclude_response, dict) and "results" in exclude_response:
+                        for rule in exclude_response["results"]:
+                            rules_to_exclude.add(rule["id"])
+                    
+                except Exception as err:
+                    _LOGGER.warning("Failed to apply exclude filter '%s': %s", filter_query, err)
+                    continue
+            
+            # Remove excluded rules
+            if rules_to_exclude:
+                original_count = len(all_rules["results"])
+                all_rules["results"] = [
+                    rule for rule in all_rules["results"] 
+                    if rule["id"] not in rules_to_exclude
+                ]
+                excluded_count = original_count - len(all_rules["results"])
+                _LOGGER.debug("Excluded %d rules based on exclude filters", excluded_count)
+        
+        # Update count
+        all_rules["count"] = len(all_rules["results"])
+        
+        _LOGGER.debug(
+            "Rule filtering complete: %d rules after applying %d include and %d exclude filters",
+            all_rules["count"],
+            len(self.include_filters),
+            len(self.exclude_filters)
+        )
+        
+        return all_rules
+
+    def _process_rules_data(self, rules_response: Dict[str, Any] | list) -> Dict[str, Any]:
+        """Process and normalize rules data from the MSP API."""
+        if not rules_response:
+            _LOGGER.warning("No rules data received from API")
             return {}
         
-        processed_devices = {}
-        invalid_devices = 0
-        
-        for device_info in devices_data:
-            try:
-                if not isinstance(device_info, dict):
-                    _LOGGER.debug("Skipping invalid device data: %s", type(device_info))
-                    invalid_devices += 1
-                    continue
-                
-                # Use MAC address as the key, or generate one if missing
-                device_mac = device_info.get("mac", device_info.get("id", f"unknown_{len(processed_devices)}"))
-                
-                # Ensure required fields exist with defaults
-                processed_device = {
-                    "mac": device_mac,
-                    "name": device_info.get("name", f"Device {device_mac}"),
-                    "ip": device_info.get("ip", ""),
-                    "online": bool(device_info.get("online", False)),
-                    "lastActiveTimestamp": device_info.get("lastActiveTimestamp", device_info.get("lastSeen", 0)),
-                    "deviceClass": device_info.get("deviceClass", device_info.get("type", "unknown")),
-                }
-                
-                # Include all original fields, but validate critical ones
-                for key, value in device_info.items():
-                    if key not in processed_device:
-                        processed_device[key] = value
-                
-                processed_devices[device_mac] = processed_device
-                
-            except Exception as err:
-                _LOGGER.warning("Error processing device: %s", err)
-                invalid_devices += 1
-                continue
-        
-        if invalid_devices > 0:
-            _LOGGER.warning("Skipped %d invalid device entries", invalid_devices)
-        
-        _LOGGER.debug("Processed %d valid devices", len(processed_devices))
-        return processed_devices
-
-    def _process_rules_data(self, rules_data: list) -> Dict[str, Any]:
-        """Process and normalize rules data from the MSP API."""
-        if not isinstance(rules_data, list):
-            _LOGGER.warning("Invalid rules data format received from API: %s", type(rules_data))
+        # Handle different response formats
+        rules_list = []
+        if isinstance(rules_response, list):
+            rules_list = rules_response
+            _LOGGER.debug("Rules response is direct array with %d items", len(rules_list))
+        elif isinstance(rules_response, dict):
+            if "results" in rules_response:
+                rules_list = rules_response["results"]
+                _LOGGER.debug("Rules response has 'results' key with %d items", len(rules_list))
+            else:
+                rules_list = list(rules_response.values()) if rules_response else []
+                _LOGGER.debug("Rules response is dict, converted to list with %d items", len(rules_list))
+        else:
+            _LOGGER.error("Invalid rules response format: expected dict or list, got %s", type(rules_response))
             return {}
         
         processed_rules = {}
         invalid_rules = 0
         
-        for rule_info in rules_data:
+        for rule_info in rules_list:
             try:
                 if not isinstance(rule_info, dict):
                     _LOGGER.debug("Skipping invalid rule data: %s", type(rule_info))
@@ -483,15 +433,54 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                 # Use rule ID as the key
                 rule_id = rule_info.get("id", rule_info.get("rid", f"rule_{len(processed_rules)}"))
                 
-                # Ensure required fields exist with defaults
+                # Extract target information from real API structure
+                target_info = rule_info.get("target", {})
+                target_type = target_info.get("type", "unknown") if isinstance(target_info, dict) else rule_info.get("type", "unknown")
+                target_value = target_info.get("value", "") if isinstance(target_info, dict) else rule_info.get("value", "")
+                
+                # Extract scope information
+                scope_info = rule_info.get("scope", {})
+                scope_type = scope_info.get("type", "") if isinstance(scope_info, dict) else ""
+                scope_value = scope_info.get("value", "") if isinstance(scope_info, dict) else ""
+                
+                # Determine if rule is paused based on status field
+                status = rule_info.get("status", "active")
+                is_paused = status == "paused"
+                is_disabled = rule_info.get("disabled", False)
+                
+                # Process rule data based on real MSP API structure
                 processed_rule = {
+                    # Core identifiers
                     "rid": rule_id,
-                    "type": rule_info.get("type", "unknown"),
-                    "target": rule_info.get("target", ""),
-                    "disabled": bool(rule_info.get("disabled", False)),
-                    "paused": bool(rule_info.get("paused", False)),
+                    "id": rule_id,
+                    # Rule definition (real API structure)
+                    "type": target_type,
+                    "value": target_value,
+                    "target": target_value,  # Map value to target for compatibility
+                    "target_name": rule_info.get("target_name", ""),
+                    # Rule state
+                    "disabled": bool(is_disabled),
+                    "paused": bool(is_paused),
+                    "status": status,
                     "action": rule_info.get("action", "block"),
-                    "description": rule_info.get("description", ""),
+                    # Rule metadata
+                    "description": rule_info.get("description", rule_info.get("notes", "")),
+                    "priority": rule_info.get("priority", 0),
+                    "direction": rule_info.get("direction", "bidirection"),
+                    # Scope information
+                    "scope_type": scope_type,
+                    "scope_value": scope_value,
+                    # DNS-only flag from target
+                    "dnsOnly": target_info.get("dnsOnly", False) if isinstance(target_info, dict) else False,
+                    # Timestamps (real API uses ts/updateTs)
+                    "created_at": rule_info.get("ts", rule_info.get("createdAt", 0)),
+                    "modified_at": rule_info.get("updateTs", rule_info.get("modifiedAt", 0)),
+                    "ts": rule_info.get("ts", 0),
+                    "updateTs": rule_info.get("updateTs", 0),
+                    # Additional fields
+                    "schedule": rule_info.get("schedule"),
+                    "hit": rule_info.get("hit", {}),
+                    "gid": rule_info.get("gid", ""),
                 }
                 
                 # Include all original fields
@@ -512,492 +501,154 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Processed %d valid rules", len(processed_rules))
         return processed_rules
 
-    async def async_get_box_devices(self) -> Dict[str, Any]:
-        """Get managed devices for the specific Firewalla box.
+    def _detect_rule_changes(self, current_rules: Dict[str, Any]) -> Dict[str, Any]:
+        """Compare current rules with previous rules to detect changes."""
+        changes = {
+            "added": [],
+            "removed": [],
+            "modified": [],
+        }
         
-        Returns a dictionary of devices with MAC addresses as keys.
-        Each device contains: mac, name, ip, online, lastActiveTimestamp, deviceClass.
-        """
-        try:
-            # First try to get from cached data
-            if self.data and "devices" in self.data:
-                return self.data["devices"]
-            
-            # If no cached data, fetch directly from API
-            _LOGGER.debug("Fetching devices directly from API for box %s", self.box_gid)
-            response = await self.api.get_devices(self.box_gid)
-            
-            if response and isinstance(response, list):
-                devices_data = self._process_devices_data(response)
-                _LOGGER.debug("Retrieved %d devices from API", len(devices_data))
-                return devices_data
-            else:
-                _LOGGER.warning("No device data received from API")
-                return {}
+        # Find added rules
+        for rule_id in current_rules:
+            if rule_id not in self._previous_rules:
+                changes["added"].append(rule_id)
+        
+        # Find removed rules
+        for rule_id in self._previous_rules:
+            if rule_id not in current_rules:
+                changes["removed"].append(rule_id)
+        
+        # Find modified rules
+        for rule_id in current_rules:
+            if rule_id in self._previous_rules:
+                current_rule = current_rules[rule_id]
+                previous_rule = self._previous_rules[rule_id]
                 
-        except Exception as err:
-            _LOGGER.error("Failed to get box devices: %s", err)
-            return {}
+                # Check if rule state or metadata changed
+                if (current_rule.get("paused") != previous_rule.get("paused") or
+                    current_rule.get("disabled") != previous_rule.get("disabled") or
+                    current_rule.get("modified_at") != previous_rule.get("modified_at")):
+                    changes["modified"].append(rule_id)
+        
+        if any(changes.values()):
+            _LOGGER.debug(
+                "Rule changes detected: %d added, %d removed, %d modified",
+                len(changes["added"]),
+                len(changes["removed"]),
+                len(changes["modified"])
+            )
+        
+        return changes
+
+    def _calculate_rule_statistics(self, rules_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate rule statistics for the sensor entity."""
+        stats = {
+            "total": len(rules_data),
+            "active": 0,
+            "paused": 0,
+            "by_type": {},
+        }
+        
+        for rule in rules_data.values():
+            # Count active vs paused
+            if rule.get("paused", False):
+                stats["paused"] += 1
+            else:
+                stats["active"] += 1
+            
+            # Count by type
+            rule_type = rule.get("type", "unknown")
+            stats["by_type"][rule_type] = stats["by_type"].get(rule_type, 0) + 1
+        
+        return stats
 
     async def async_get_rules(self, query: Optional[str] = None) -> Dict[str, Any]:
-        """Get current rules and their status with optional filtering.
-        
-        Args:
-            query: Optional query string for filtering rules (e.g., "status:active", "action:block")
-            
-        Returns a dictionary of rules with rule IDs as keys.
-        Each rule contains: rid, type, target, disabled, paused, action, description.
-        """
+        """Get current rules with optional filtering."""
         try:
             # If no query specified and we have cached data, return it
             if not query and self.data and "rules" in self.data:
                 return self.data["rules"]
             
             # Fetch from API with optional query
-            _LOGGER.debug("Fetching rules from API for box %s with query: %s", self.box_gid, query)
-            response = await self.api.get_rules(self.box_gid, query)
+            _LOGGER.debug("Fetching rules from API with query: %s", query)
+            response = await self.api.get_rules(query)
             
-            if response and isinstance(response, list):
+            if response:
                 processed_rules = self._process_rules_data(response)
                 _LOGGER.debug("Retrieved %d rules from API", len(processed_rules))
                 return processed_rules
-            else:
-                _LOGGER.warning("No rules data received from API")
-                return {}
+            
+            _LOGGER.warning("No rules data received from API")
+            return {}
                 
         except Exception as err:
             _LOGGER.error("Failed to get rules: %s", err)
             return {}
 
-    async def async_create_rule(self, rule_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a new rule for device blocking or gaming pause.
-        
-        Args:
-            rule_data: Rule configuration containing:
-                - type: Rule type ("internet" for blocking, "gaming" for gaming pause)
-                - target: Target device MAC address (format: "mac:aa:bb:cc:dd:ee:ff")
-                - action: Rule action ("block" or "allow")
-                - description: Human-readable description
-                - Additional rule-specific parameters
-                
-        Returns the created rule data from the API response.
-        """
+    async def async_pause_rule(self, rule_id: str) -> bool:
+        """Pause a rule to temporarily disable it while preserving configuration."""
         try:
-            _LOGGER.debug("Creating rule for box %s: %s", self.box_gid, rule_data)
-            
-            # Validate required fields
-            required_fields = ["type", "target", "action"]
-            for field in required_fields:
-                if field not in rule_data:
-                    raise ValueError(f"Missing required field '{field}' in rule data")
-            
-            # Ensure target is in correct format for MAC addresses
-            if rule_data["target"] and not rule_data["target"].startswith("mac:"):
-                if ":" in rule_data["target"] and len(rule_data["target"]) == 17:
-                    # Looks like a MAC address, add the mac: prefix
-                    rule_data["target"] = f"mac:{rule_data['target']}"
-            
-            result = await self.api.create_rule(self.box_gid, rule_data)
-            
-            if result and isinstance(result, dict):
-                _LOGGER.info("Successfully created rule: %s", result.get("id", "unknown"))
-                # Trigger a data refresh to get the updated rules
-                await self.async_request_refresh()
-                return result
-            else:
-                _LOGGER.error("Invalid response when creating rule: %s", result)
-                raise HomeAssistantError("Failed to create rule: Invalid API response")
-                
-        except Exception as err:
-            _LOGGER.error("Failed to create rule: %s", err)
-            raise
-
-    async def async_pause_rule(self, rule_id: str) -> Dict[str, Any]:
-        """Pause a rule to temporarily disable it while preserving for future use.
-        
-        Args:
-            rule_id: The unique identifier of the rule to pause
-            
-        Returns the API response confirming the rule was paused.
-        """
-        try:
-            _LOGGER.debug("Pausing rule %s for box %s", rule_id, self.box_gid)
+            _LOGGER.debug("Pausing rule %s", rule_id)
             
             if not rule_id:
                 raise ValueError("Rule ID cannot be empty")
             
-            result = await self.api.pause_rule(self.box_gid, rule_id)
+            result = await self.api.pause_rule(rule_id)
             
             if result:
                 _LOGGER.info("Successfully paused rule: %s", rule_id)
                 # Trigger a data refresh to get the updated rule status
                 await self.async_request_refresh()
-                return result
+                return True
             else:
-                _LOGGER.error("Invalid response when pausing rule %s: %s", rule_id, result)
-                raise HomeAssistantError(f"Failed to pause rule {rule_id}: Invalid API response")
+                _LOGGER.error("Failed to pause rule %s: Invalid API response", rule_id)
+                return False
                 
         except Exception as err:
             _LOGGER.error("Failed to pause rule %s: %s", rule_id, err)
-            raise
+            return False
 
-    async def async_unpause_rule(self, rule_id: str) -> Dict[str, Any]:
-        """Unpause a rule to re-enable it.
-        
-        Args:
-            rule_id: The unique identifier of the rule to unpause
-            
-        Returns the API response confirming the rule was unpaused.
-        """
+    async def async_unpause_rule(self, rule_id: str) -> bool:
+        """Unpause a rule to re-enable it."""
         try:
-            _LOGGER.debug("Unpausing rule %s for box %s", rule_id, self.box_gid)
+            _LOGGER.debug("Unpausing rule %s", rule_id)
             
             if not rule_id:
                 raise ValueError("Rule ID cannot be empty")
             
-            result = await self.api.unpause_rule(self.box_gid, rule_id)
+            result = await self.api.unpause_rule(rule_id)
             
             if result:
                 _LOGGER.info("Successfully unpaused rule: %s", rule_id)
                 # Trigger a data refresh to get the updated rule status
                 await self.async_request_refresh()
-                return result
+                return True
             else:
-                _LOGGER.error("Invalid response when unpausing rule %s: %s", rule_id, result)
-                raise HomeAssistantError(f"Failed to unpause rule {rule_id}: Invalid API response")
+                _LOGGER.error("Failed to unpause rule %s: Invalid API response", rule_id)
+                return False
                 
         except Exception as err:
             _LOGGER.error("Failed to unpause rule %s: %s", rule_id, err)
-            raise
+            return False
 
-    @property
-    def box_info(self) -> Dict[str, Any]:
-        """Get box information from cached data."""
-        if self.data and "box_info" in self.data:
-            return self.data["box_info"]
-        return {}
-
-    @property
-    def devices(self) -> Dict[str, Any]:
-        """Get devices from cached data."""
-        if self.data and "devices" in self.data:
-            return self.data["devices"]
-        return {}
-
-    @property
-    def rules(self) -> Dict[str, Any]:
-        """Get rules from cached data."""
-        if self.data and "rules" in self.data:
-            return self.data["rules"]
-        return {}
-
-    async def async_create_device_block_rule(self, device_mac: str, device_name: str = None) -> Dict[str, Any]:
-        """Create an internet blocking rule for a specific device.
-        
-        Args:
-            device_mac: MAC address of the device to block
-            device_name: Optional friendly name for the rule description
-            
-        Returns the created rule data.
-        """
-        rule_data = {
-            "type": "internet",
-            "target": f"mac:{device_mac}" if not device_mac.startswith("mac:") else device_mac,
-            "action": "block",
-            "description": f"Block internet access for {device_name or device_mac}",
-            "enabled": True
-        }
-        
-        return await self.async_create_rule(rule_data)
-
-    async def async_create_gaming_pause_rule(self, device_mac: str, device_name: str = None) -> Dict[str, Any]:
-        """Create a gaming pause rule for a specific device.
-        
-        Args:
-            device_mac: MAC address of the device to pause gaming
-            device_name: Optional friendly name for the rule description
-            
-        Returns the created rule data.
-        """
-        rule_data = {
-            "type": "gaming",
-            "target": f"mac:{device_mac}" if not device_mac.startswith("mac:") else device_mac,
-            "action": "block",
-            "description": f"Gaming pause for {device_name or device_mac}",
-            "enabled": True
-        }
-        
-        return await self.async_create_rule(rule_data)
-
-    async def async_get_device_rules(self, device_mac: str, rule_type: str = None) -> Dict[str, Any]:
-        """Get all rules for a specific device, optionally filtered by type.
-        
-        Args:
-            device_mac: MAC address of the device
-            rule_type: Optional rule type filter ("internet", "gaming", etc.)
-            
-        Returns dictionary of rules for the device.
-        """
+    async def async_get_rule_status(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        """Get individual rule status for verification."""
         try:
-            # Format MAC address consistently
-            target_mac = f"mac:{device_mac}" if not device_mac.startswith("mac:") else device_mac
+            _LOGGER.debug("Getting status for rule %s", rule_id)
             
-            # Get all rules and filter for this device
-            all_rules = await self.async_get_rules()
-            device_rules = {}
+            if not rule_id:
+                raise ValueError("Rule ID cannot be empty")
             
-            for rule_id, rule_data in all_rules.items():
-                if rule_data.get("target") == target_mac:
-                    if not rule_type or rule_data.get("type") == rule_type:
-                        device_rules[rule_id] = rule_data
+            result = await self.api.get_rule_status(rule_id)
             
-            _LOGGER.debug("Found %d rules for device %s (type: %s)", len(device_rules), device_mac, rule_type)
-            return device_rules
-            
-        except Exception as err:
-            _LOGGER.error("Failed to get device rules for %s: %s", device_mac, err)
-            return {}
-
-    @property
-    def devices(self) -> Dict[str, Any]:
-        """Get devices data from coordinator."""
-        if self.data and "devices" in self.data:
-            return self.data["devices"]
-        return {}
-
-    @property
-    def box_info(self) -> Dict[str, Any]:
-        """Get box information from coordinator."""
-        if self.data and "box_info" in self.data:
-            return self.data["box_info"]
-        return {}
-
-    @property
-    def rules(self) -> Dict[str, Any]:
-        """Get rules data from coordinator."""
-        if self.data and "rules" in self.data:
-            return self.data["rules"]
-        return {}
-
-    def get_device_by_mac(self, mac_address: str) -> Optional[Dict[str, Any]]:
-        """Get device information by MAC address from cached data.
-        
-        Args:
-            mac_address: MAC address of the device
-            
-        Returns device data or None if not found.
-        """
-        devices = self.devices
-        return devices.get(mac_address)
-
-    def get_device_friendly_name(self, device_mac: str, device_data: Dict[str, Any] = None) -> str:
-        """Get a friendly name for a device, handling disambiguation for multiple devices.
-        
-        Args:
-            device_mac: MAC address of the device
-            device_data: Optional device data (will fetch if not provided)
-            
-        Returns a friendly, disambiguated device name.
-        """
-        if device_data is None:
-            device_data = self.get_device_by_mac(device_mac)
-            if not device_data:
-                return f"Device {device_mac}"
-        
-        # Get the base name from device data
-        base_name = device_data.get("name", "")
-        hostname = device_data.get("hostname", "")
-        
-        # Prefer hostname over name if available and different
-        if hostname and hostname != base_name:
-            friendly_name = self._sanitize_device_name(hostname)
-        elif base_name:
-            friendly_name = self._sanitize_device_name(base_name)
-        else:
-            # Fallback to device class or MAC
-            device_class = device_data.get("deviceClass", "")
-            if device_class and device_class != "unknown":
-                friendly_name = f"{self._format_model_name(device_class)}"
+            if result:
+                _LOGGER.debug("Retrieved status for rule %s", rule_id)
+                return result
             else:
-                friendly_name = f"Device {device_mac}"
-        
-        # Check for name conflicts with other devices
-        all_devices = self.devices
-        conflicting_devices = []
-        
-        for other_mac, other_data in all_devices.items():
-            if other_mac != device_mac:
-                other_name = other_data.get("name", "")
-                other_hostname = other_data.get("hostname", "")
+                _LOGGER.warning("No status data received for rule %s", rule_id)
+                return None
                 
-                # Check if names would conflict
-                if (other_hostname and other_hostname == friendly_name) or \
-                   (other_name and other_name == friendly_name):
-                    conflicting_devices.append(other_mac)
-        
-        # If there are conflicts, add disambiguation
-        if conflicting_devices:
-            # Add IP address for disambiguation if available
-            device_ip = device_data.get("ip", "")
-            if device_ip:
-                friendly_name = f"{friendly_name} ({device_ip})"
-            else:
-                # Fallback to last 4 characters of MAC address
-                mac_suffix = device_mac.replace(":", "")[-4:].upper()
-                friendly_name = f"{friendly_name} ({mac_suffix})"
-        
-        return friendly_name
-
-    def get_device_info_dict(self, device_mac: str, device_data: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Get comprehensive device info dictionary for Home Assistant device registry.
-        
-        Args:
-            device_mac: MAC address of the device
-            device_data: Optional device data (will fetch if not provided)
-            
-        Returns device info dictionary with all required fields.
-        """
-        if device_data is None:
-            device_data = self.get_device_by_mac(device_mac)
-            if not device_data:
-                return {}
-        
-        # Get friendly name with disambiguation
-        friendly_name = self.get_device_friendly_name(device_mac, device_data)
-        
-        # Get box information for firmware version
-        box_data = self.box_info
-        
-        # Determine device model based on device class
-        device_class = device_data.get("deviceClass", "unknown")
-        model = self._format_model_name(device_class)
-        
-        # Build device info dictionary
-        device_info = {
-            "identifiers": {(DOMAIN, device_mac)},
-            "name": friendly_name,
-            "manufacturer": "Firewalla",
-            "model": model,
-        }
-        
-        # Add firmware version from box info if available
-        firmware_version = box_data.get("version") or box_data.get("firmwareVersion")
-        if firmware_version:
-            device_info["sw_version"] = firmware_version
-        
-        # Add connection via Firewalla box
-        if hasattr(self, 'box_gid') and self.box_gid:
-            device_info["via_device"] = (DOMAIN, self.box_gid)
-        
-        # Add additional identifiers if available
-        device_ip = device_data.get("ip")
-        if device_ip:
-            device_info["connections"] = {("ip", device_ip)}
-        
-        return device_info
-
-    def get_all_device_info_dicts(self) -> Dict[str, Dict[str, Any]]:
-        """Get device info dictionaries for all devices.
-        
-        Returns a dictionary mapping MAC addresses to device info dictionaries.
-        """
-        device_info_dicts = {}
-        devices = self.devices
-        
-        for device_mac, device_data in devices.items():
-            device_info_dicts[device_mac] = self.get_device_info_dict(device_mac, device_data)
-        
-        return device_info_dicts
-
-    def has_device_info_changed(self, device_mac: str, previous_device_data: Dict[str, Any]) -> bool:
-        """Check if device information has changed since the last update.
-        
-        Args:
-            device_mac: MAC address of the device
-            previous_device_data: Previous device data to compare against
-            
-        Returns True if device info has changed, False otherwise.
-        """
-        current_device_data = self.get_device_by_mac(device_mac)
-        if not current_device_data:
-            return previous_device_data is not None
-        
-        # Check key fields that affect device info
-        key_fields = ["name", "hostname", "deviceClass", "ip"]
-        
-        for field in key_fields:
-            if current_device_data.get(field) != previous_device_data.get(field):
-                return True
-        
-        # Check if box info has changed (affects firmware version)
-        box_data = self.box_info
-        if box_data.get("version") != getattr(self, '_last_box_version', None):
-            self._last_box_version = box_data.get("version")
-            return True
-        
-        return False
-
-    def _sanitize_device_name(self, name: str) -> str:
-        """Sanitize device name for use in Home Assistant.
-        
-        Args:
-            name: Raw device name
-            
-        Returns sanitized name suitable for Home Assistant entities.
-        """
-        if not name or not isinstance(name, str):
-            return "Unknown Device"
-        
-        # Remove or replace problematic characters
-        import re
-        
-        # Replace common problematic characters
-        sanitized = name.strip()
-        sanitized = re.sub(r'[<>:"/\\|?*]', '_', sanitized)  # Replace filesystem-unsafe chars
-        sanitized = re.sub(r'\s+', ' ', sanitized)  # Normalize whitespace
-        sanitized = sanitized.strip('_. ')  # Remove leading/trailing punctuation
-        
-        # Ensure name is not empty after sanitization
-        if not sanitized:
-            return "Unknown Device"
-        
-        # Limit length to reasonable size
-        if len(sanitized) > 50:
-            sanitized = sanitized[:47] + "..."
-        
-        return sanitized
-
-    def _format_model_name(self, device_class: str) -> str:
-        """Format device class into a readable model name.
-        
-        Args:
-            device_class: Raw device class from API
-            
-        Returns formatted model name.
-        """
-        if not device_class or device_class == "unknown":
-            return "Network Device"
-        
-        # Handle common device classes
-        class_mappings = {
-            "gaming_console": "Gaming Console",
-            "smart_tv": "Smart TV",
-            "mobile_phone": "Mobile Phone",
-            "laptop": "Laptop",
-            "desktop": "Desktop Computer",
-            "tablet": "Tablet",
-            "smart_speaker": "Smart Speaker",
-            "iot_device": "IoT Device",
-            "router": "Router",
-            "access_point": "Access Point",
-        }
-        
-        # Check for direct mapping
-        if device_class.lower() in class_mappings:
-            return class_mappings[device_class.lower()]
-        
-        # Format by replacing underscores and capitalizing
-        formatted = device_class.replace("_", " ").replace("-", " ")
-        formatted = " ".join(word.capitalize() for word in formatted.split())
-        
-        return formatted
+        except Exception as err:
+            _LOGGER.error("Failed to get rule status for %s: %s", rule_id, err)
+            return None

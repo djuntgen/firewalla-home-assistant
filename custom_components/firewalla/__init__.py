@@ -1,8 +1,7 @@
-"""The Firewalla integration."""
+"""The Firewalla integration for rule management."""
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
@@ -14,73 +13,92 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BOX_GID,
+    CONF_EXCLUDE_FILTERS,
+    CONF_INCLUDE_FILTERS,
     CONF_MSP_URL,
     DOMAIN,
+    PLATFORMS,
 )
 from .coordinator import FirewallaDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Supported platforms for this integration
-PLATFORMS_TO_SETUP = [Platform.SWITCH, Platform.SENSOR]
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Firewalla from a config entry."""
-    _LOGGER.info("Setting up Firewalla integration for entry %s", entry.entry_id)
+    """Set up Firewalla rule management from a config entry."""
+    _LOGGER.info("Setting up Firewalla rule management integration for entry %s", entry.entry_id)
     
     try:
         # Extract configuration data with validation
-        msp_url = entry.data.get(CONF_MSP_URL)
+        msp_domain = entry.data.get(CONF_MSP_URL)
         access_token = entry.data.get(CONF_ACCESS_TOKEN)
         box_gid = entry.data.get(CONF_BOX_GID)
         
         # Validate required configuration
-        if not msp_url or not access_token or not box_gid:
+        if not msp_domain or not access_token or not box_gid:
             _LOGGER.error(
-                "Missing required configuration data: MSP URL=%s, Token=%s, Box GID=%s",
-                bool(msp_url), bool(access_token), bool(box_gid)
+                "Missing required configuration data: MSP Domain=%s, Token=%s, Box GID=%s",
+                bool(msp_domain), bool(access_token), bool(box_gid)
             )
             raise ConfigEntryNotReady("Missing required configuration data")
         
         _LOGGER.debug(
-            "Initializing Firewalla integration with MSP URL: %s, Box GID: %s",
-            msp_url,
+            "Initializing Firewalla rule management with MSP domain: %s, Box GID: %s",
+            msp_domain,
             box_gid,
         )
         
         # Get aiohttp session for API communication
         session = async_get_clientsession(hass)
         
-        # Initialize the data update coordinator
+        # Get rule filter options
+        include_filters = entry.options.get(CONF_INCLUDE_FILTERS, [])
+        exclude_filters = entry.options.get(CONF_EXCLUDE_FILTERS, [])
+        
+        # Initialize the data update coordinator for rule discovery
         coordinator = FirewallaDataUpdateCoordinator(
             hass=hass,
             session=session,
-            msp_url=msp_url,
+            msp_domain=msp_domain,
             access_token=access_token,
             box_gid=box_gid,
+            include_filters=include_filters,
+            exclude_filters=exclude_filters,
         )
         
-        # Test authentication and initial data fetch
-        _LOGGER.debug("Testing MSP API authentication and initial data fetch")
+        # Test authentication and perform initial rule discovery
+        _LOGGER.debug("Testing MSP API authentication and performing initial rule discovery")
         await coordinator.async_config_entry_first_refresh()
+        
+        # Log rule discovery results
+        if coordinator.data:
+            rule_count = coordinator.data.get("rule_count", {})
+            _LOGGER.info(
+                "Successfully discovered %d rules (%d active, %d paused)",
+                rule_count.get("total", 0),
+                rule_count.get("active", 0),
+                rule_count.get("paused", 0)
+            )
         
         # Store coordinator in hass.data for access by platforms
         hass.data.setdefault(DOMAIN, {})
         hass.data[DOMAIN][entry.entry_id] = coordinator
         
-        _LOGGER.info("Successfully initialized Firewalla coordinator")
+        _LOGGER.info("Successfully initialized Firewalla rule management coordinator")
         
-        # Set up platforms asynchronously
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_TO_SETUP)
+        # Set up platforms for rule control and monitoring
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         
-        _LOGGER.info("Successfully set up Firewalla integration platforms")
+        # Set up options update listener
+        entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+        
+        _LOGGER.info("Successfully set up Firewalla rule management platforms")
         
         return True
         
     except ConfigEntryAuthFailed as err:
         _LOGGER.error(
-            "Authentication failed during Firewalla setup: %s. "
+            "Authentication failed during Firewalla rule management setup: %s. "
             "Please check your MSP credentials and try again.",
             err,
         )
@@ -92,8 +110,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except aiohttp.ClientConnectorError as err:
         _LOGGER.error(
             "Cannot connect to Firewalla MSP API at %s: %s. "
-            "Please check your network connection and MSP URL.",
-            msp_url if 'msp_url' in locals() else 'unknown',
+            "Please check your network connection and MSP domain.",
+            msp_domain if 'msp_domain' in locals() else 'unknown',
             err,
         )
         raise ConfigEntryNotReady(
@@ -134,8 +152,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
     except aiohttp.ClientError as err:
         _LOGGER.error(
-            "Network error during Firewalla setup: %s. "
-            "Please check your network connection and MSP URL.",
+            "Network error during Firewalla rule management setup: %s. "
+            "Please check your network connection and MSP domain.",
             err,
         )
         raise ConfigEntryNotReady(
@@ -144,7 +162,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
     except HomeAssistantError as err:
         _LOGGER.error(
-            "Home Assistant error during Firewalla setup: %s",
+            "Home Assistant error during Firewalla rule management setup: %s",
             err,
         )
         # Re-raise Home Assistant errors as-is
@@ -152,24 +170,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
     except Exception as err:
         _LOGGER.exception(
-            "Unexpected error during Firewalla setup: %s. "
+            "Unexpected error during Firewalla rule management setup: %s. "
             "This may indicate a configuration or system issue.",
             err,
         )
         raise ConfigEntryNotReady(
-            f"Unexpected error setting up Firewalla integration: {err}"
+            f"Unexpected error setting up Firewalla rule management integration: {err}"
         ) from err
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a Firewalla config entry."""
-    _LOGGER.info("Unloading Firewalla integration for entry %s", entry.entry_id)
+    """Unload a Firewalla rule management config entry."""
+    _LOGGER.info("Unloading Firewalla rule management integration for entry %s", entry.entry_id)
     
     try:
         # Unload platforms
-        _LOGGER.debug("Unloading Firewalla platforms: %s", PLATFORMS_TO_SETUP)
+        _LOGGER.debug("Unloading Firewalla rule management platforms: %s", PLATFORMS)
         unload_ok = await hass.config_entries.async_unload_platforms(
-            entry, PLATFORMS_TO_SETUP
+            entry, PLATFORMS
         )
         
         if unload_ok:
@@ -188,9 +206,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.data.pop(DOMAIN, None)
                 _LOGGER.debug("Removed Firewalla domain data (no more entries)")
             
-            _LOGGER.info("Successfully unloaded Firewalla integration")
+            _LOGGER.info("Successfully unloaded Firewalla rule management integration")
         else:
-            _LOGGER.error("Failed to unload some Firewalla platforms")
+            _LOGGER.error("Failed to unload some Firewalla rule management platforms")
             
         return unload_ok
         
@@ -199,13 +217,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
         
     except Exception as err:
-        _LOGGER.exception("Unexpected error unloading Firewalla integration: %s", err)
+        _LOGGER.exception("Unexpected error unloading Firewalla rule management integration: %s", err)
         return False
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload a Firewalla config entry."""
-    _LOGGER.info("Reloading Firewalla integration for entry %s", entry.entry_id)
+    """Reload a Firewalla rule management config entry."""
+    _LOGGER.info("Reloading Firewalla rule management integration for entry %s", entry.entry_id)
     
     try:
         # Unload the entry first
@@ -220,10 +238,10 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         setup_success = await async_setup_entry(hass, entry)
         
         if setup_success:
-            _LOGGER.info("Successfully reloaded Firewalla integration")
+            _LOGGER.info("Successfully reloaded Firewalla rule management integration")
         else:
-            _LOGGER.error("Failed to set up Firewalla integration during reload")
-            raise HomeAssistantError("Failed to set up integration during reload")
+            _LOGGER.error("Failed to set up Firewalla rule management integration during reload")
+            raise HomeAssistantError("Failed to set up rule management integration during reload")
         
     except (ConfigEntryAuthFailed, ConfigEntryNotReady) as err:
         _LOGGER.error("Configuration error during Firewalla reload: %s", err)
@@ -231,8 +249,8 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         raise
         
     except Exception as err:
-        _LOGGER.exception("Unexpected error reloading Firewalla integration: %s", err)
-        raise HomeAssistantError(f"Failed to reload Firewalla integration: {err}") from err
+        _LOGGER.exception("Unexpected error reloading Firewalla rule management integration: %s", err)
+        raise HomeAssistantError(f"Failed to reload Firewalla rule management integration: {err}") from err
 
 
 def setup_integration_logging() -> None:

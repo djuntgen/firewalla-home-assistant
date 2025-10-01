@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Firewalla Home Assistant integration is a HACS-compatible custom integration that provides device control and monitoring capabilities for Firewalla firewall devices through the MSP API. The integration follows Home Assistant's architectural patterns and HACS publication standards, implementing a coordinator-based approach for efficient API communication and reliable entity management.
+The Firewalla Home Assistant integration is a HACS-compatible custom integration that provides firewall rule control for Firewalla devices through the MSP API. The integration follows Home Assistant's architectural patterns and HACS publication standards, implementing a coordinator-based approach for efficient API communication and automatic rule discovery.
 
-The integration focuses on core functionality: device internet blocking, gaming pause controls, and status monitoring through well-defined Home Assistant entities. It prioritizes reliability, user experience, and seamless integration with Home Assistant's ecosystem while maintaining compatibility with HACS distribution requirements.
+The integration focuses on rule management: automatically discovering existing Firewalla rules and creating switch entities for each rule, allowing users to pause/unpause rules through Home Assistant. Each switch entity represents a single firewall rule, with ON state meaning the rule is active and OFF state meaning the rule is paused. The integration automatically handles rule additions, deletions, and modifications, ensuring the Home Assistant entities stay synchronized with the Firewalla configuration.
 
 ## Architecture
 
@@ -22,13 +22,16 @@ graph TB
     INT --> SW[Switch Platform]
     INT --> SEN[Sensor Platform]
     
-    SW --> BLOCK[Block Switches]
-    SW --> GAME[Gaming Switches]
-    SEN --> STATUS[Device Status Sensors]
-    SEN --> RULES[Rules Count Sensor]
+    SW --> RULES[Rule Control Switches]
+    SEN --> STATUS[Rules Status Sensor]
     
     COORD --> CACHE[Data Cache & Rate Limiting]
+    COORD --> DISCOVERY[Rule Discovery & Sync]
     API --> RETRY[Retry Logic & Error Handling]
+    
+    DISCOVERY --> ADD[Auto-Add New Rules]
+    DISCOVERY --> REMOVE[Auto-Remove Deleted Rules]
+    DISCOVERY --> UPDATE[Update Rule Metadata]
 ```
 
 ### HACS-Compatible Structure
@@ -54,11 +57,11 @@ custom_components/firewalla/
 The integration follows Home Assistant's recommended patterns:
 
 1. **Integration Core** (`__init__.py`): Handles integration lifecycle, coordinator setup, and platform loading
-2. **Configuration Flow** (`config_flow.py`): Manages MSP authentication and device selection with proper validation
-3. **Data Coordinator** (`coordinator.py`): Centralizes MSP API communication with built-in MSP API client
-4. **Switch Platform** (`switch.py`): Provides device blocking and gaming pause controls
-5. **Sensor Platform** (`sensor.py`): Monitors device status and rule counts
-6. **Constants** (`const.py`): Centralizes configuration, endpoints, and mappings
+2. **Configuration Flow** (`config_flow.py`): Manages MSP authentication and Firewalla box selection with proper validation
+3. **Data Coordinator** (`coordinator.py`): Centralizes MSP API communication with built-in rule discovery and synchronization
+4. **Switch Platform** (`switch.py`): Provides switch entities for each discovered firewall rule
+5. **Sensor Platform** (`sensor.py`): Monitors overall rule status and integration health
+6. **Constants** (`const.py`): Centralizes configuration, endpoints, and rule type mappings
 
 ## MSP API Integration Strategy
 
@@ -71,20 +74,52 @@ The integration provides targeted access to essential Firewalla MSP API endpoint
 - **Standards Compliance**: Follow Home Assistant and HACS best practices
 
 ### Configuration Flow Design
-1. **MSP URL Input**: User provides Firewalla MSP service URL (default: https://firewalla.encipher.io)
+1. **MSP URL Input**: User provides Firewalla MSP service URL (format: `mydomain.firewalla.net`)
 2. **Token Authentication**: User provides personal access token with validation and clear error messages
-3. **Box Selection**: Present available Firewalla boxes from MSP account with descriptive names
-4. **Connection Validation**: Verify API connectivity, permissions, and device access
-5. **Entity Creation**: Automatically create entities based on discovered devices and capabilities
+3. **Data Persistence**: Preserve entered MSP URL and token on validation failures to avoid re-entry
+4. **Box Selection**: Present available Firewalla boxes from MSP account with descriptive names (if multiple boxes)
+5. **Connection Validation**: Verify API connectivity, permissions, and rule access before completion
+6. **Rule Discovery**: Automatically discover existing rules and prepare for entity creation
+7. **Error Handling**: Provide specific, actionable error messages with troubleshooting guidance for common setup failures
+
+**Error Message Examples**:
+- Invalid MSP URL format: "MSP URL should be in format 'mydomain.firewalla.net' (without https://)"
+- Authentication failure: "Invalid access token. Please check your token in MSP settings."
+- Network connectivity: "Cannot connect to MSP service. Please check your internet connection and MSP URL."
+- No boxes found: "No Firewalla boxes found in your MSP account. Please ensure your box is properly registered."
+
+**Design Rationale**: The configuration flow prioritizes user experience by validating each step before proceeding and preserving user input on failures. Clear, specific error messages help users troubleshoot common issues without frustration, addressing Requirement 1 (MSP API Authentication and Setup) by providing comprehensive validation and error messaging throughout the setup process.
 
 ### API Endpoint Integration
 Based on Firewalla MSP API documentation and examples (github.com/firewalla/msp-api-examples):
 
-- **Box Management**: Box listing and status via `/v2/msp/boxes` and `/v2/msp/boxes/{gid}`
-- **Device Management**: Device listing and status via `/v2/msp/boxes/{gid}/devices`
-- **Rule Management**: Rule CRUD operations via `/v2/msp/boxes/{gid}/rules`
-- **Rule Control**: Pause/unpause operations via `/v2/msp/boxes/{gid}/rules/{rid}/pause`
-- **Authentication**: Token-based authentication with automatic refresh handling
+**Base URL Format**: `https://{msp_domain}/v2` where `msp_domain` is user's MSP domain (e.g., `mydomain.firewalla.net`)
+
+**Authentication**: 
+- Header: `Authorization: Token {access_token}`
+- Content-Type: `application/json`
+
+**Core Endpoints**:
+- **Rule Discovery**: `GET /rules` - Get all rules with optional query parameters
+- **Rule Query**: `GET /rules?query={conditions}` - Filter rules by status, action, etc.
+- **Rule Pause**: `POST /rules/{rule_id}/pause` - Pause a specific rule
+- **Rule Unpause**: `POST /rules/{rule_id}/unpause` - Unpause a specific rule (endpoint to be confirmed)
+- **Legacy Rule List**: `GET /v1/rule/list` - Legacy endpoint for rule listing (deprecated but functional)
+
+**Query Parameters for Rule Discovery**:
+- `status:active` - Get active (unpaused) rules
+- `status:paused` - Get paused rules  
+- `action:allow` - Get allow rules
+- `action:block` - Get block rules
+- Combined queries: `status:paused action:allow` - Get paused allow rules
+
+**Rate Limiting and Caching**:
+- Maximum 10 requests/minute per device with intelligent batching
+- 30+ second response caching to minimize API load
+- Exponential backoff for failed requests
+- Change detection using rule modification timestamps
+
+**Design Rationale**: The API integration follows the official MSP API examples exactly to ensure compatibility and reliability. The v2 API provides better query capabilities for efficient rule discovery and filtering, addressing Requirements 2 (Automatic Rule Discovery) and 3 (Rule Control) while maintaining efficient API usage per Requirement 10 (Performance and Scalability).
 
 ### HACS Publication Requirements
 - **Repository Structure**: Follow HACS integration requirements with proper file organization
@@ -122,11 +157,16 @@ Based on Firewalla MSP API documentation and examples (github.com/firewalla/msp-
   - Validate selected device connectivity and permissions
 
 **Key Methods**:
-- `async_step_user()`: Handle MSP URL and token input
-- `async_step_device_selection()`: Present available devices for user selection
-- `_authenticate_msp()`: Validate MSP credentials and discover API capabilities
-- `_get_available_devices()`: Fetch device list from MSP API
-- `_validate_device_access()`: Confirm access to selected device
+- `async_step_user()`: Handle MSP URL and token input with comprehensive validation and data persistence
+- `async_step_box_selection()`: Present available boxes for user selection (if multiple boxes exist)
+- `_authenticate_msp()`: Validate MSP credentials using Token authentication against v2 API
+- `_validate_msp_url()`: Validate MSP URL format (mydomain.firewalla.net)
+- `_get_available_boxes()`: Fetch box list from MSP API with error handling
+- `_test_rule_access()`: Verify rule access permissions using `/v2/rules` endpoint
+- `_handle_setup_errors()`: Provide specific, actionable error messages for common failure scenarios
+- `_preserve_user_input()`: Maintain user-entered data across validation failures
+
+**Design Rationale**: The configuration flow emphasizes validation at each step to prevent incomplete setups and provides clear error messaging to guide users through troubleshooting, directly addressing Requirements 1.2, 1.5, and 7.4.
 
 ### Data Update Coordinator
 
@@ -141,14 +181,13 @@ Based on Firewalla MSP API documentation and examples (github.com/firewalla/msp-
   - Cache API responses to minimize unnecessary requests
 
 **Key Methods**:
-- `_async_update_data()`: Fetch latest data from MSP API with error handling
-- `async_get_box_info()`: Get Firewalla box information and online status
-- `async_get_devices()`: Retrieve devices with status and metadata
-- `async_get_rules()`: Get current rules filtered by integration-managed rules
-- `async_create_rule()`: Create new blocking or gaming pause rules
-- `async_pause_rule()`: Pause an existing rule (preserving for future use)
-- `async_unpause_rule()`: Resume a paused rule
-- `async_delete_rule()`: Delete rules when entities are removed
+- `_async_update_data()`: Fetch latest rule data from MSP API with error handling
+- `async_get_rules()`: Get all rules using `/v2/rules` endpoint with optional query filters
+- `async_pause_rule(rule_id)`: Pause a rule using `POST /v2/rules/{rule_id}/pause`
+- `async_unpause_rule(rule_id)`: Unpause a rule using `POST /v2/rules/{rule_id}/unpause`
+- `async_get_rule_status(rule_id)`: Get individual rule status for verification
+- `_detect_rule_changes()`: Compare current rules with cached rules to detect additions/deletions/modifications
+- `_authenticate()`: Validate MSP credentials using Token authentication
 
 **Data Structure**:
 ```python
@@ -161,27 +200,49 @@ Based on Firewalla MSP API documentation and examples (github.com/firewalla/msp-
         "version": "1.975",
         "lastSeen": 1648632679193
     },
-    "devices": {
-        "aa:bb:cc:dd:ee:ff": {
-            "mac": "aa:bb:cc:dd:ee:ff",
-            "name": "Device Name",
-            "hostname": "device-hostname",
-            "ip": "192.168.1.100",
-            "online": True,
-            "lastActiveTimestamp": 1648632679.193,
-            "deviceClass": "laptop"
-        }
-    },
     "rules": {
-        "rule-uuid": {
-            "rid": "rule-uuid",
+        "rule-uuid-1": {
+            "rid": "rule-uuid-1",
             "type": "internet",
             "target": "mac:aa:bb:cc:dd:ee:ff",
+            "target_name": "John's Laptop",
             "disabled": False,
             "paused": False,
             "action": "block",
-            "description": "HA: Block internet access",
-            "createdBy": "home-assistant"
+            "description": "Block internet during study time",
+            "priority": 1000,
+            "created_at": 1648632679193,
+            "modified_at": 1648632679193,
+            "schedule": {
+                "enabled": True,
+                "days": ["monday", "tuesday"],
+                "start_time": "20:00",
+                "end_time": "22:00"
+            }
+        },
+        "rule-uuid-2": {
+            "rid": "rule-uuid-2",
+            "type": "category",
+            "target": "category:gaming",
+            "target_name": "Gaming Category",
+            "disabled": False,
+            "paused": True,
+            "action": "block",
+            "description": "Block gaming websites",
+            "priority": 500,
+            "created_at": 1648632679193,
+            "modified_at": 1648632679193,
+            "schedule": None
+        }
+    },
+    "rule_count": {
+        "total": 15,
+        "active": 12,
+        "paused": 3,
+        "by_type": {
+            "internet": 8,
+            "category": 4,
+            "domain": 3
         }
     }
 }
@@ -214,51 +275,87 @@ The integration creates entities through standard Home Assistant platform files,
 ### Switch Entities
 
 **File**: `switch.py`
-- **Purpose**: Provide switch controls for device blocking and gaming pause with proper state management
+- **Purpose**: Provide switch controls for each discovered Firewalla rule with proper state management
 - **Entity Types**:
-  - Internet blocking switches (one per device): `firewalla_{mac}_block`
-  - Gaming pause switches (gaming devices only): `firewalla_{mac}_gaming`
+  - Rule control switches (one per rule): `firewalla_rule_{rule_id}`
 
 **Key Methods**:
-- `async_turn_on()`: Create/activate rules via MSP API with error handling
-- `async_turn_off()`: Pause rules (preserve for future use) rather than delete
-- `is_on`: Return current state based on rule active status from coordinator data
+- `async_turn_on()`: Unpause the rule via MSP API with error handling
+- `async_turn_off()`: Pause the rule via MSP API (preserves rule configuration)
+- `is_on`: Return current state based on rule paused status from coordinator data (ON = active/unpaused, OFF = paused)
 - `available`: Check coordinator data availability and API connectivity
 - `device_info`: Provide proper device information for Home Assistant device registry
 
 **Entity Features**:
-- Unique IDs based on MAC addresses for consistency across restarts
-- Descriptive names using device hostnames when available
-- Proper device grouping for multi-device households
-- State attributes showing rule IDs and last updated timestamps
+- Unique IDs based on rule IDs for consistency across restarts (format: `firewalla_rule_{rule_id}`)
+- Descriptive names using rule descriptions with fallback to rule type and target information
+- Rich state attributes showing rule metadata (type, target, description, priority, schedule, etc.)
+- Automatic entity creation for new rules and removal for deleted rules
+- Proper handling of rule modifications and metadata updates
+
+**Entity Attributes**:
+- `rule_id`: Firewalla rule identifier
+- `rule_type`: Type of rule (internet, category, domain, etc.)
+- `target`: Rule target (MAC address, category, domain, etc.)
+- `target_name`: Human-readable target name
+- `action`: Rule action (block, allow, etc.)
+- `priority`: Rule priority level
+- `schedule`: Rule schedule information (if applicable)
+- `created_at`: Rule creation timestamp
+- `modified_at`: Rule last modification timestamp
+
+**Design Rationale**: The entity design focuses on rule-centric control rather than device-centric, allowing users to manage any type of Firewalla rule through Home Assistant. This addresses Requirements 2 (Automatic Rule Discovery), 3 (Rule Control), 4 (Rule Metadata), and 5 (Entity Naming) by providing comprehensive rule management with rich metadata.
 
 ### Sensor Entities
 
 **File**: `sensor.py`
-- **Purpose**: Provide monitoring for device status and rule information with proper attributes
+- **Purpose**: Provide monitoring for overall rule status and integration health with proper attributes
 - **Entity Types**:
-  - Device status sensors (one per device): `firewalla_{mac}_status`
-  - Active rules count sensor: `firewalla_rules_active`
+  - Rules summary sensor: `firewalla_rules_summary`
 
 **Key Methods**:
-- `native_value`: Return sensor value from coordinator data
-- `extra_state_attributes`: Provide relevant device/rule information
+- `native_value`: Return total rule count from coordinator data
+- `extra_state_attributes`: Provide detailed rule statistics and breakdown
 - `available`: Check coordinator data freshness and API connectivity
-- `device_info`: Link sensors to appropriate devices
+- `device_info`: Link sensor to Firewalla device
 
 **Sensor Features**:
-- Device status sensors show online/offline with last seen timestamps
-- Rules sensor shows count of active integration-managed rules
-- Rich attributes including IP addresses, device classes, and rule details
+- Shows total number of discovered rules as the main value
+- Rich attributes including active/paused rule counts, rule type breakdown, and last update timestamp
+- Integration health information including API connectivity status
 - Proper state classes and device classes for Home Assistant UI
 
-### Rules Management Strategy
+**Sensor Attributes**:
+- `total_rules`: Total number of discovered rules
+- `active_rules`: Number of active (unpaused) rules
+- `paused_rules`: Number of paused rules
+- `rules_by_type`: Breakdown of rules by type (internet, category, domain, etc.)
+- `last_updated`: Last successful rule discovery timestamp
+- `api_status`: Current API connectivity status
 
-Rules are managed transparently through switch entities:
-- **Creation**: Switches create rules with descriptive names and "home-assistant" tags
-- **State Management**: Rule pause/unpause preserves rules for future use
-- **Cleanup**: Integration tracks and manages only its own rules
-- **Conflict Resolution**: Handle external rule modifications gracefully
+### Rule Discovery and Synchronization Strategy
+
+Rules are discovered and managed automatically with intelligent synchronization:
+- **Discovery**: Automatically discover all existing Firewalla rules on startup and during periodic updates
+- **Entity Creation**: Create switch entities for each discovered rule with descriptive names and rich metadata
+- **State Synchronization**: Continuously monitor rule changes and update entity states accordingly
+- **Dynamic Management**: Automatically add entities for new rules and remove entities for deleted rules
+- **Metadata Updates**: Update entity attributes when rule metadata changes (description, schedule, etc.)
+- **Conflict Resolution**: Handle external rule modifications gracefully with state synchronization
+- **Error Recovery**: Maintain entity availability even when individual rule operations fail
+
+**Rule Filtering**:
+- Include all controllable rules (rules that can be paused/unpaused)
+- Exclude system rules that cannot be modified
+- Handle rule types: internet blocking, category blocking, domain blocking, time-based rules, etc.
+
+**Change Detection**:
+- Compare rule lists between updates to detect additions and deletions
+- Compare rule metadata to detect modifications
+- Use rule modification timestamps for efficient change detection
+- Implement debouncing to avoid excessive entity updates
+
+**Design Rationale**: The rule discovery strategy provides comprehensive coverage of existing Firewalla rules while maintaining efficient synchronization. This addresses Requirements 2 (Automatic Rule Discovery), 3 (Rule Control), and 4 (Rule Metadata) by ensuring all controllable rules are available in Home Assistant with up-to-date information.
 
 ## Data Models
 
@@ -274,23 +371,26 @@ class FirewallaBox:
     last_seen: int
 
 @dataclass
-class FirewallaDevice:
-    mac: str
-    name: str
-    ip: str
-    online: bool
-    last_active_timestamp: float
-    device_class: str
-
-@dataclass
 class FirewallaRule:
     rid: str
     type: str
     target: str
+    target_name: str
     disabled: bool
     paused: bool
     action: str
     description: str
+    priority: int
+    created_at: int
+    modified_at: int
+    schedule: Optional[Dict[str, Any]]
+
+@dataclass
+class RuleStatistics:
+    total: int
+    active: int
+    paused: int
+    by_type: Dict[str, int]
 ```
 
 ### API Response Models
@@ -311,11 +411,14 @@ class AuthResponse:
 ## Error Handling and Reliability
 
 ### API Error Mapping
-- **Connection Errors**: Map to `ConfigEntryNotReady` during setup with retry suggestions
-- **Authentication Errors**: Map to `ConfigEntryAuthFailed` with clear credential guidance
-- **Rate Limiting**: Implement exponential backoff (1s, 2s, 4s, 8s) with maximum 3 retry attempts
-- **Timeout Errors**: Use 30-second timeout with graceful degradation and user-friendly messages
-- **Server Errors**: Distinguish between temporary (5xx) and permanent (4xx) errors
+- **Connection Errors**: Map to `ConfigEntryNotReady` during setup with retry suggestions and troubleshooting guidance
+- **Authentication Errors**: Map to `ConfigEntryAuthFailed` with clear credential guidance and token refresh instructions
+- **Rate Limiting**: Implement exponential backoff (1s, 2s, 4s, 8s) with maximum 3 retry attempts and intelligent request spacing
+- **Timeout Errors**: Use 30-second timeout with graceful degradation and user-friendly error messages
+- **Server Errors**: Distinguish between temporary (5xx) and permanent (4xx) errors with appropriate retry strategies
+- **Token Expiration**: Automatic token refresh with fallback to re-authentication flow
+
+**Design Rationale**: The error handling strategy provides comprehensive coverage of failure scenarios while maintaining user experience through clear messaging and automatic recovery mechanisms, directly addressing Requirements 5.1, 5.2, 5.3, and 7.4.
 
 ### Entity Error States
 - **Unavailable State**: Set when coordinator data is stale or API communication fails
@@ -416,3 +519,26 @@ firewalla-home-assistant/
 - **Version Tagging**: Proper Git tags for version tracking
 - **Changelog**: Maintain CHANGELOG.md with version history
 - **Breaking Changes**: Clear documentation of breaking changes
+
+## Performance and Scalability
+
+### Performance Optimization Strategy
+
+The integration implements several performance optimizations to handle multiple devices efficiently:
+
+- **Minimum Update Intervals**: 30-second minimum between API calls to respect rate limits and API constraints
+- **Intelligent Caching**: Cache API responses with appropriate TTL to minimize unnecessary requests
+- **Batch Operations**: Group related API requests to minimize network overhead and improve efficiency
+- **Async Operations**: All API calls use async/await patterns for non-blocking execution
+- **Resource Management**: Proper cleanup of aiohttp sessions and connections to prevent memory leaks
+- **Startup Optimization**: Quick initialization without blocking Home Assistant startup process
+- **Request Batching**: Efficiently handle multiple devices with batched API requests where possible
+
+### Scalability Design
+
+- **Multi-Device Support**: Handle multiple Firewalla devices without naming conflicts or performance degradation
+- **Entity Limits**: No artificial limits on number of devices or entities created
+- **Memory Efficiency**: Minimal memory footprint with efficient data structures and garbage collection
+- **Network Efficiency**: Intelligent request scheduling and caching strategies to minimize API load
+
+**Design Rationale**: Performance optimizations ensure the integration scales well with multiple devices while maintaining responsive user experience and respecting API limits, directly addressing all aspects of Requirement 8 (Performance and Scalability). The design prioritizes efficiency without sacrificing functionality or reliability.
