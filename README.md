@@ -27,6 +27,7 @@ A Home Assistant integration for Firewalla firewall devices that provides **rule
 - **Integration Health**: Monitor API connectivity and rule synchronization status
 
 ### 🔧 Advanced Features
+- **Rule Filtering**: Configure which rules appear in Home Assistant using Firewalla's query syntax
 - **MSP API Integration**: Full integration with Firewalla's MSP API v2
 - **Automatic Discovery**: Discover and select from available Firewalla boxes
 - **Error Recovery**: Robust error handling with automatic retry logic
@@ -69,7 +70,8 @@ A Home Assistant integration for Firewalla firewall devices that provides **rule
    - **MSP Domain**: Your Firewalla MSP domain (e.g., `mydomain.firewalla.net` or `https://mydomain.firewalla.net`)
    - **Personal Access Token**: Your MSP API access token
 4. Select your Firewalla box (if you have multiple boxes)
-5. Complete the setup and wait for rule discovery
+5. (Optional) Configure rule filters to show only specific rules
+6. Complete the setup and wait for rule discovery
 
 ### Configuration Options
 
@@ -79,17 +81,66 @@ A Home Assistant integration for Firewalla firewall devices that provides **rule
 | Personal Access Token | Your MSP API access token | Yes | `msp_token_abc123...` |
 | Firewalla Box | Select from discovered boxes | Yes | Auto-selected if only one |
 
+## Rule Filtering
+
+### Overview
+Configure which Firewalla rules appear in Home Assistant using powerful filtering options. This allows you to show only the rules you need, reducing clutter and improving organization.
+
+### Configuration
+1. Go to **Configuration** → **Integrations**
+2. Find your Firewalla integration and click **Configure**
+3. Add include/exclude filters using Firewalla's query syntax
+4. Save and the integration will reload with filtered rules
+
+### Filter Examples
+
+#### Include Filters (show only these)
+- `status:active` - Show only active rules (71 of 83 rules)
+- `target.type:app` - Show only app rules (13 rules: YouTube, Facebook, TikTok)
+- `action:block` - Show only blocking rules (60 rules)
+- `scope.value:"FC:34:97:A5:9F:91"` - Show rules for specific device (8 rules)
+
+#### Exclude Filters (hide these)
+- `-status:paused` - Hide paused rules (show 71 instead of 83)
+- `-action:allow` - Hide allow rules (show 60 instead of 83)
+- `-target.type:category` - Hide category rules (show 49 instead of 83)
+
+#### Combined Examples
+**Parent Dashboard**: Show only kids' device rules
+```
+Include: scope.value:"FC:34:97:A5:9F:91"
+Result: 8 device-specific rules (av, social, facebook)
+```
+
+**IT Admin View**: Show only active security rules
+```
+Include: status:active, action:block
+Result: 48 active blocking rules
+```
+
+**Home User**: Show only app controls
+```
+Include: target.type:app
+Result: 13 app rules (YouTube, Facebook, TikTok, etc.)
+```
+
+### Available Filter Types
+- **Status**: `status:active`, `status:paused`
+- **Action**: `action:block`, `action:allow`
+- **Type**: `target.type:app`, `target.type:category`, `target.type:internet`, `target.type:ip`, `target.type:domain`
+- **Device**: `scope.value:"MAC:ADDRESS"`, `device.name:*iphone*`
+
 ## Entities
 
 ### Switch Entities (Rule Control)
 
 #### Rule Control Switches
-- **Entity ID**: `switch.firewalla_rule_{rule_id}`
+- **Entity ID**: `switch.firewalla_rule_{rule_name}` (e.g., `switch.firewalla_rule_youtube`, `switch.firewalla_rule_internet_access`)
 - **Purpose**: Control individual Firewalla rules (pause/unpause)
 - **States**: 
   - `on`: Rule is active (unpaused)
   - `off`: Rule is paused (temporarily disabled)
-- **Naming**: Uses rule description or falls back to rule type and target
+- **Naming**: Uses human-readable names based on rule description or rule type/target
 - **Attributes**: 
   - `rule_id`: Firewalla rule identifier
   - `rule_type`: Type of rule (internet, category, domain, etc.)
@@ -141,7 +192,7 @@ automation:
     action:
       - service: switch.turn_on
         target:
-          entity_id: switch.firewalla_rule_gaming_block_rule
+          entity_id: switch.firewalla_rule_gaming_category
 ```
 
 #### Pause Rules in the Evening
@@ -155,8 +206,8 @@ automation:
       - service: switch.turn_off
         target:
           entity_id: 
-            - switch.firewalla_rule_internet_block_kids
-            - switch.firewalla_rule_gaming_restriction
+            - switch.firewalla_rule_internet_access
+            - switch.firewalla_rule_gaming_category
 ```
 
 #### Rule Status Notifications
@@ -189,8 +240,8 @@ automation:
       - service: switch.turn_off
         target:
           entity_id: 
-            - switch.firewalla_rule_school_hours_block
-            - switch.firewalla_rule_gaming_weekday_limit
+            - switch.firewalla_rule_internet_access
+            - switch.firewalla_rule_gaming_category
 ```
 
 ### Dashboard Cards
@@ -200,9 +251,11 @@ automation:
 type: entities
 title: Firewalla Rule Control
 entities:
-  - switch.firewalla_rule_internet_block_kids
-  - switch.firewalla_rule_gaming_restriction
-  - switch.firewalla_rule_social_media_block
+  - switch.firewalla_rule_internet_access
+  - switch.firewalla_rule_gaming_category
+  - switch.firewalla_rule_social_category
+  - switch.firewalla_rule_youtube
+  - switch.firewalla_rule_facebook
   - sensor.firewalla_rules_summary
 ```
 
