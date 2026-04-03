@@ -21,6 +21,7 @@ MSP_API_V2_BASE = "https://{domain}/v2"
 # API endpoints (based on official MSP API examples)
 API_ENDPOINTS = {
     # V2 endpoints (preferred)
+    "boxes": "/boxes",
     "rules": "/rules",
     "rule_pause": "/rules/{rule_id}/pause",
     "rule_resume": "/rules/{rule_id}/resume",

@@ -213,6 +213,14 @@ class FirewallaMSPClient:
             endpoint += f"?query={query}"
         return await self._make_request("GET", endpoint)
 
+    async def get_boxes(self) -> list:
+        """Get list of Firewalla boxes from MSP API."""
+        endpoint = API_ENDPOINTS["boxes"]
+        result = await self._make_request("GET", endpoint)
+        if isinstance(result, list):
+            return result
+        return []
+
     async def pause_rule(self, rule_id: str) -> Dict[str, Any]:
         """Pause a rule via MSP API."""
         endpoint = API_ENDPOINTS["rule_pause"].format(rule_id=rule_id)
@@ -253,7 +261,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         self._previous_rules = {}
         self.include_filters = include_filters or []
         self.exclude_filters = exclude_filters or []
-        
+        self._boxes: Dict[str, Dict[str, Any]] = {}  # gid → box info mapping
+
         super().__init__(
             hass,
             _LOGGER,
@@ -273,6 +282,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.error("MSP API authentication failed during data update")
                     raise ConfigEntryAuthFailed("MSP API authentication failed")
 
+            # Fetch box information
+            self._boxes = await self._fetch_boxes()
+
             # Fetch rules with filters applied
             _LOGGER.debug("Fetching rules from MSP API with filters")
             rules_response = await self._fetch_filtered_rules()
@@ -286,15 +298,19 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             # Calculate rule statistics
             rule_stats = self._calculate_rule_statistics(rules_data)
             
+            current_box = self._boxes.get(self.box_gid, {})
             processed_data = {
                 "rules": rules_data,
                 "rule_count": rule_stats,
                 "rule_changes": rule_changes,
                 "last_updated": self.last_update_success,
+                "boxes": self._boxes,
                 "box_info": {
                     "gid": self.box_gid,
-                    "name": f"Firewalla Box {self.box_gid[:8]}",
-                    "online": True,  # Assume online if we can fetch data
+                    "name": current_box.get("name", f"Firewalla Box {self.box_gid[:8]}"),
+                    "model": current_box.get("model", "unknown"),
+                    "online": current_box.get("online", True),
+                    "version": current_box.get("version"),
                 }
             }
             
@@ -321,6 +337,27 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.exception("Unexpected error during MSP API data update: %s", err)
             raise UpdateFailed(f"Unexpected error communicating with MSP API: {err}") from err
+
+    async def _fetch_boxes(self) -> Dict[str, Dict[str, Any]]:
+        """Fetch box information and build gid-to-box mapping."""
+        try:
+            boxes_list = await self.api.get_boxes()
+            boxes_map = {}
+            for box in boxes_list:
+                gid = box.get("gid", "")
+                if gid:
+                    boxes_map[gid] = {
+                        "gid": gid,
+                        "name": box.get("name", f"Firewalla {box.get('model', 'Box').title()}"),
+                        "model": box.get("model", "unknown"),
+                        "online": box.get("online", False),
+                        "version": box.get("version"),
+                    }
+            _LOGGER.debug("Fetched %d boxes from MSP API", len(boxes_map))
+            return boxes_map
+        except Exception as err:
+            _LOGGER.warning("Failed to fetch boxes, using cached data: %s", err)
+            return self._boxes
 
     async def _fetch_filtered_rules(self) -> Dict[str, Any]:
         """Fetch rules with include/exclude filters applied."""
