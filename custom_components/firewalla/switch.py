@@ -94,15 +94,18 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
         super().__init__(coordinator)
         self._rule_id = rule_id
         self._rule_data = rule_data.copy()
-        
+
+        # Resolve box name for multi-box prefix
+        self._box_name = self._resolve_box_name(rule_data)
+
         # Generate a clean entity ID based on rule name
         entity_name = self._generate_entity_name(rule_data)
         clean_entity_id = self._generate_clean_entity_id(entity_name, rule_id)
         self._attr_unique_id = f"firewalla_rule_{clean_entity_id}"
-        
+
         # Set entity name based on rule information
         self._attr_name = self._generate_entity_name(rule_data)
-        
+
         # Set device info
         self._attr_device_info = self._get_device_info()
 
@@ -137,51 +140,71 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
         
         return clean_id
 
+    def _resolve_box_name(self, rule_data: Dict[str, Any]) -> str:
+        """Resolve the box name for this rule from coordinator boxes data."""
+        boxes = {}
+        if self.coordinator.data and "boxes" in self.coordinator.data:
+            boxes = self.coordinator.data["boxes"]
+
+        # Only prefix when there are multiple boxes
+        if len(boxes) <= 1:
+            return ""
+
+        rule_gid = rule_data.get("gid", "")
+        if rule_gid and rule_gid in boxes:
+            return boxes[rule_gid].get("name", "")
+        return ""
+
     def _generate_entity_name(self, rule_data: Dict[str, Any]) -> str:
         """Generate a descriptive entity name based on rule information."""
         # Try to use rule description first
         description = rule_data.get("description", "").strip()
         if description:
-            return description
-        
-        # Get rule type and value from actual API structure
-        rule_type = rule_data.get("type", "unknown")
-        rule_value = rule_data.get("value", "")
-        
-        # Create descriptive name based on rule type
-        rule_type_display = RULE_TYPES.get(rule_type, rule_type.title())
-        
-        if rule_type == "app":
-            # App blocking rule
-            app_name = rule_value.title() if rule_value else "App"
-            return f"Block {app_name}"
-        elif rule_type == "category":
-            # Category blocking rule
-            category_name = rule_value.title() if rule_value else "Category"
-            return f"Block {category_name} Category"
-        elif rule_type == "domain":
-            # Domain blocking rule
-            domain_name = rule_value if rule_value else "Domain"
-            return f"Block {domain_name}"
-        elif rule_type == "ip":
-            # IP blocking rule
-            ip_address = rule_value if rule_value else "IP"
-            return f"Block {ip_address}"
-        elif rule_type == "internet":
-            # Internet blocking rule
-            return "Block Internet Access"
-        elif rule_type == "intranet":
-            # Intranet rule
-            if rule_value:
-                return f"Intranet Access - {rule_value[:8]}"
-            else:
-                return "Intranet Access"
+            base_name = description
         else:
-            # Generic rule
-            if rule_value:
-                return f"{rule_type_display} - {rule_value}"
+            # Get rule type and value from actual API structure
+            rule_type = rule_data.get("type", "unknown")
+            rule_value = rule_data.get("value", "")
+
+            # Create descriptive name based on rule type
+            rule_type_display = RULE_TYPES.get(rule_type, rule_type.title())
+
+            if rule_type == "app":
+                # App blocking rule
+                app_name = rule_value.title() if rule_value else "App"
+                base_name = f"Block {app_name}"
+            elif rule_type == "category":
+                # Category blocking rule
+                category_name = rule_value.title() if rule_value else "Category"
+                base_name = f"Block {category_name} Category"
+            elif rule_type == "domain":
+                # Domain blocking rule
+                domain_name = rule_value if rule_value else "Domain"
+                base_name = f"Block {domain_name}"
+            elif rule_type == "ip":
+                # IP blocking rule
+                ip_address = rule_value if rule_value else "IP"
+                base_name = f"Block {ip_address}"
+            elif rule_type == "internet":
+                # Internet blocking rule
+                base_name = "Block Internet Access"
+            elif rule_type == "intranet":
+                # Intranet rule
+                if rule_value:
+                    base_name = f"Intranet Access - {rule_value[:8]}"
+                else:
+                    base_name = "Intranet Access"
             else:
-                return f"{rule_type_display} Rule"
+                # Generic rule
+                if rule_value:
+                    base_name = f"{rule_type_display} - {rule_value}"
+                else:
+                    base_name = f"{rule_type_display} Rule"
+
+        # Prefix with box name when multiple boxes exist
+        if self._box_name:
+            return f"{self._box_name} - {base_name}"
+        return base_name
 
     def _get_device_info(self) -> Dict[str, Any]:
         """Get device info for the Firewalla box."""
@@ -204,12 +227,11 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
     @property
     def name(self) -> str:
         """Return the name of the entity, refreshed from current rule data."""
-        # Get current rule data to ensure fresh name
         current_rule_data = self._get_current_rule_data()
         if current_rule_data:
+            self._box_name = self._resolve_box_name(current_rule_data)
             return self._generate_entity_name(current_rule_data)
         else:
-            # Fallback to stored name if rule not found
             return self._attr_name
 
     @property
@@ -267,7 +289,14 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
         # Add rule status information
         attributes["rule_status"] = "active" if not current_rule_data.get("paused", False) else "paused"
         attributes["rule_disabled"] = current_rule_data.get("disabled", False)
-        
+
+        # Add box name attribute
+        rule_gid = current_rule_data.get("gid", "")
+        if rule_gid and self.coordinator.data and "boxes" in self.coordinator.data:
+            boxes = self.coordinator.data["boxes"]
+            if rule_gid in boxes:
+                attributes["box_name"] = boxes[rule_gid].get("name", "Unknown")
+
         return attributes
 
     def _get_current_rule_data(self) -> Optional[Dict[str, Any]]:
