@@ -95,15 +95,14 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
         self._rule_id = rule_id
         self._rule_data = rule_data.copy()
 
-        # Resolve box name for multi-box prefix
-        self._box_name = self._resolve_box_name(rule_data)
-
-        # Generate a clean entity ID based on rule name
+        # Generate unique_id from base name (no box prefix) for stability
+        self._box_name = ""
         entity_name = self._generate_entity_name(rule_data)
         clean_entity_id = self._generate_clean_entity_id(entity_name, rule_id)
         self._attr_unique_id = f"firewalla_rule_{clean_entity_id}"
 
-        # Set entity name based on rule information
+        # Now resolve box name for display
+        self._box_name = self._resolve_box_name(rule_data)
         self._attr_name = self._generate_entity_name(rule_data)
 
         # Set device info

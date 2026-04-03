@@ -355,6 +355,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     }
             _LOGGER.debug("Fetched %d boxes from MSP API", len(boxes_map))
             return boxes_map
+        except (ConfigEntryAuthFailed, asyncio.CancelledError):
+            raise
         except Exception as err:
             _LOGGER.warning("Failed to fetch boxes, using cached data: %s", err)
             return self._boxes
