@@ -23,7 +23,7 @@ API_ENDPOINTS = {
     # V2 endpoints (preferred)
     "rules": "/rules",
     "rule_pause": "/rules/{rule_id}/pause",
-    "rule_unpause": "/rules/{rule_id}/unpause",
+    "rule_resume": "/rules/{rule_id}/resume",
     "rule_detail": "/rules/{rule_id}",
     
     # V1 endpoints (legacy, for fallback)

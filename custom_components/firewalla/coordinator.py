@@ -153,7 +153,7 @@ class FirewallaMSPClient:
                         _LOGGER.debug("MSP API response received successfully")
                         return result
                     except aiohttp.ContentTypeError:
-                        # Handle non-JSON responses (e.g., for pause/unpause operations)
+                        # Handle non-JSON responses (e.g., for pause/resume operations)
                         if response.status == 200:
                             return {"success": True}
                         else:
@@ -218,9 +218,9 @@ class FirewallaMSPClient:
         endpoint = API_ENDPOINTS["rule_pause"].format(rule_id=rule_id)
         return await self._make_request("POST", endpoint)
 
-    async def unpause_rule(self, rule_id: str) -> Dict[str, Any]:
-        """Unpause a rule via MSP API."""
-        endpoint = API_ENDPOINTS["rule_unpause"].format(rule_id=rule_id)
+    async def resume_rule(self, rule_id: str) -> Dict[str, Any]:
+        """Resume a paused rule via MSP API."""
+        endpoint = API_ENDPOINTS["rule_resume"].format(rule_id=rule_id)
         return await self._make_request("POST", endpoint)
 
     async def get_rule_status(self, rule_id: str) -> Dict[str, Any]:
@@ -609,27 +609,27 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Failed to pause rule %s: %s", rule_id, err)
             return False
 
-    async def async_unpause_rule(self, rule_id: str) -> bool:
-        """Unpause a rule to re-enable it."""
+    async def async_resume_rule(self, rule_id: str) -> bool:
+        """Resume a paused rule to re-enable it."""
         try:
-            _LOGGER.debug("Unpausing rule %s", rule_id)
-            
+            _LOGGER.debug("Resuming rule %s", rule_id)
+
             if not rule_id:
                 raise ValueError("Rule ID cannot be empty")
-            
-            result = await self.api.unpause_rule(rule_id)
-            
+
+            result = await self.api.resume_rule(rule_id)
+
             if result:
-                _LOGGER.info("Successfully unpaused rule: %s", rule_id)
+                _LOGGER.info("Successfully resumed rule: %s", rule_id)
                 # Trigger a data refresh to get the updated rule status
                 await self.async_request_refresh()
                 return True
             else:
-                _LOGGER.error("Failed to unpause rule %s: Invalid API response", rule_id)
+                _LOGGER.error("Failed to resume rule %s: Invalid API response", rule_id)
                 return False
-                
+
         except Exception as err:
-            _LOGGER.error("Failed to unpause rule %s: %s", rule_id, err)
+            _LOGGER.error("Failed to resume rule %s: %s", rule_id, err)
             return False
 
     async def async_get_rule_status(self, rule_id: str) -> Optional[Dict[str, Any]]:

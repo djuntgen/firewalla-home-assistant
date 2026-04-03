@@ -68,9 +68,9 @@
       "name": "Pause Rule",
       "description": "Pause an existing Firewalla rule while preserving it for future use."
     },
-    "unpause_rule": {
-      "name": "Unpause Rule", 
-      "description": "Unpause a previously paused Firewalla rule."
+    "resume_rule": {
+      "name": "Resume Rule",
+      "description": "Resume a previously paused Firewalla rule."
     }
   },
   "exceptions": {
@@ -87,7 +87,7 @@
       "message": "The specified Firewalla rule was not found. It may have been deleted or is no longer accessible."
     },
     "rule_operation_failed": {
-      "message": "Failed to pause/unpause Firewalla rule. Please check the rule status and try again."
+      "message": "Failed to pause/resume Firewalla rule. Please check the rule status and try again."
     }
   }
 }

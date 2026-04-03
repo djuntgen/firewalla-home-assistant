@@ -6,7 +6,7 @@ with Home Assistant. It provides a two-step process:
 2. Box selection from available Firewalla boxes in the MSP account
 
 The integration focuses on rule management - discovering existing Firewalla rules
-and creating switch entities for each rule to allow pause/unpause control.
+and creating switch entities for each rule to allow pause/resume control.
 """
 from __future__ import annotations
 

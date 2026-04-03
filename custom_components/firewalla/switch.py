@@ -82,7 +82,7 @@ async def async_setup_entry(
 
 
 class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
-    """Switch entity for controlling individual Firewalla rules (pause/unpause)."""
+    """Switch entity for controlling individual Firewalla rules (pause/resume)."""
 
     def __init__(
         self,
@@ -278,30 +278,30 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
         return self.coordinator.data["rules"].get(self._rule_id)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn on the rule (unpause it to make it active)."""
-        _LOGGER.debug("Turning on (unpausing) rule %s", self._rule_id)
-        
+        """Turn on the rule (resume it to make it active)."""
+        _LOGGER.debug("Turning on (resuming) rule %s", self._rule_id)
+
         try:
             current_rule_data = self._get_current_rule_data()
             if not current_rule_data:
                 _LOGGER.error("Cannot turn on rule %s: rule not found", self._rule_id)
                 raise HomeAssistantError(f"Rule {self._rule_id} not found")
-            
+
             # Check if rule is already active
             if not current_rule_data.get("paused", False):
                 _LOGGER.debug("Rule %s is already active", self._rule_id)
                 return
-            
-            # Unpause the rule
-            _LOGGER.info("Unpausing rule %s", self._rule_id)
-            success = await self.coordinator.async_unpause_rule(self._rule_id)
-            
+
+            # Resume the rule
+            _LOGGER.info("Resuming rule %s", self._rule_id)
+            success = await self.coordinator.async_resume_rule(self._rule_id)
+
             if success:
-                _LOGGER.debug("Successfully unpaused rule %s", self._rule_id)
+                _LOGGER.debug("Successfully resumed rule %s", self._rule_id)
             else:
-                _LOGGER.error("Failed to unpause rule %s", self._rule_id)
-                raise HomeAssistantError(f"Failed to unpause rule {self._rule_id}")
-            
+                _LOGGER.error("Failed to resume rule %s", self._rule_id)
+                raise HomeAssistantError(f"Failed to resume rule {self._rule_id}")
+
         except HomeAssistantError:
             # Re-raise Home Assistant errors as-is
             raise
