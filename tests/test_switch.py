@@ -8,7 +8,7 @@ from custom_components.firewalla.switch import (
     FirewallaRuleSwitch,
     async_setup_entry,
 )
-from custom_components.firewalla.const import DOMAIN, ENTITY_ID_FORMATS
+from custom_components.firewalla.const import DOMAIN
 
 
 @pytest.fixture
@@ -30,6 +30,7 @@ def mock_coordinator():
                 "created_at": 1648632679193,
                 "modified_at": 1648632679193,
                 "schedule": None,
+                "gid": "box-123",
             },
             "rule-456": {
                 "rid": "rule-456",
@@ -44,6 +45,7 @@ def mock_coordinator():
                 "created_at": 1648632679193,
                 "modified_at": 1648632679193,
                 "schedule": None,
+                "gid": "box-123",
             },
         },
         "rule_count": {
@@ -58,6 +60,15 @@ def mock_coordinator():
             "model": "gold",
             "online": True,
             "version": "1.975",
+        },
+        "boxes": {
+            "box-123": {
+                "gid": "box-123",
+                "name": "Firewalla Gold",
+                "model": "gold",
+                "online": True,
+                "version": "1.975",
+            },
         },
     }
     coordinator.box_gid = "box-123"
@@ -90,12 +101,12 @@ class TestFirewallaRuleSwitch:
         """Test switch initialization."""
         rule_id = "rule-123"
         rule_data = mock_coordinator.data["rules"][rule_id]
-        
+
         switch = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
-        
+
         assert switch._rule_id == rule_id
         assert switch._rule_data == rule_data
-        assert switch.unique_id == ENTITY_ID_FORMATS["rule_switch"].format(rule_id=rule_id)
+        assert switch.unique_id == "firewalla_rule_internet_during_study_time"
         assert switch.name == "Block internet during study time"
 
     def test_name_generation_with_description(self, mock_coordinator):
@@ -108,20 +119,23 @@ class TestFirewallaRuleSwitch:
         assert switch.name == "Block internet during study time"
 
     def test_name_generation_without_description(self, mock_coordinator):
-        """Test entity name generation without description."""
-        rule_id = "rule-123"
+        """Test entity name generation without description falls back to type-based name."""
+        rule_id = "rule-no-desc"
         rule_data = {
-            "rid": "rule-123",
+            "rid": "rule-no-desc",
             "type": "internet",
             "target": "mac:aa:bb:cc:dd:ee:ff",
             "target_name": "John's Laptop",
             "action": "block",
             "description": "",
+            "gid": "box-123",
         }
-        
+        # Add rule to coordinator data so _get_current_rule_data finds it
+        mock_coordinator.data["rules"][rule_id] = rule_data
+
         switch = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
-        
-        assert switch.name == "Internet Access - John's Laptop"
+
+        assert switch.name == "Block Internet Access"
 
     def test_is_on_active_rule(self, mock_coordinator):
         """Test is_on property for active rule."""
@@ -187,22 +201,66 @@ class TestFirewallaRuleSwitch:
         """Test extra state attributes."""
         rule_id = "rule-123"
         rule_data = mock_coordinator.data["rules"][rule_id]
-        
+
         switch = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
-        
+
         # Mock _get_current_rule_data to return rule data
         switch._get_current_rule_data = MagicMock(return_value=rule_data)
-        
+
         attributes = switch.extra_state_attributes
-        
+
         assert attributes["rule_id"] == rule_id
-        assert attributes["rule_type"] == "internet"
+        assert attributes["rule_type_display"] == "Internet Access"
         assert attributes["target"] == "mac:aa:bb:cc:dd:ee:ff"
         assert attributes["target_name"] == "John's Laptop"
         assert attributes["action"] == "block"
         assert attributes["description"] == "Block internet during study time"
         assert attributes["rule_status"] == "active"
         assert attributes["rule_disabled"] is False
+
+    def test_name_with_box_prefix_multi_box(self, mock_coordinator):
+        """Test entity name includes box prefix when multiple boxes exist."""
+        mock_coordinator.data["boxes"]["box-999"] = {
+            "gid": "box-999", "name": "Office Purple", "model": "purple", "online": True,
+        }
+        rule_id = "rule-123"
+        rule_data = mock_coordinator.data["rules"][rule_id]
+        switch = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
+        assert switch.name == "Firewalla Gold - Block internet during study time"
+
+    def test_name_without_box_prefix_single_box(self, mock_coordinator):
+        """Test entity name has no prefix with single box."""
+        rule_id = "rule-123"
+        rule_data = mock_coordinator.data["rules"][rule_id]
+        switch = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
+        assert switch.name == "Block internet during study time"
+
+    def test_box_name_in_attributes(self, mock_coordinator):
+        """Test box_name appears in entity attributes."""
+        rule_id = "rule-123"
+        rule_data = mock_coordinator.data["rules"][rule_id]
+        switch = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
+        switch._get_current_rule_data = MagicMock(return_value=rule_data)
+        attributes = switch.extra_state_attributes
+        assert attributes["box_name"] == "Firewalla Gold"
+
+    def test_unique_id_stable_across_box_count_changes(self, mock_coordinator):
+        """Test unique_id does not change when box count changes (no box prefix in ID)."""
+        rule_id = "rule-123"
+        rule_data = mock_coordinator.data["rules"][rule_id]
+
+        # Single box
+        switch_single = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
+        uid_single = switch_single.unique_id
+
+        # Add second box
+        mock_coordinator.data["boxes"]["box-999"] = {
+            "gid": "box-999", "name": "Office Purple", "model": "purple", "online": True,
+        }
+        switch_multi = FirewallaRuleSwitch(mock_coordinator, rule_id, rule_data)
+        uid_multi = switch_multi.unique_id
+
+        assert uid_single == uid_multi
 
     @pytest.mark.asyncio
     async def test_async_turn_on_paused_rule(self, mock_coordinator):
@@ -333,9 +391,10 @@ class TestAsyncSetupEntry:
     @pytest.mark.asyncio
     async def test_async_setup_entry_missing_coordinator(self, mock_hass, mock_config_entry):
         """Test setup with missing coordinator."""
-        # Don't add coordinator to hass.data
-        
-        async_add_entities = AsyncMock()
-        
+        # Use a real dict so KeyError is raised when entry_id is missing
+        mock_hass.data = {DOMAIN: {}}
+
+        async_add_entities = MagicMock()
+
         with pytest.raises(HomeAssistantError, match="Coordinator not found"):
             await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)

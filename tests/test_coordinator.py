@@ -45,6 +45,7 @@ def mock_api_responses():
                 "target_name": "Gaming Category",
                 "disabled": False,
                 "paused": True,
+                "status": "paused",
                 "action": "block",
                 "description": "Block gaming websites",
                 "priority": 500,
@@ -113,13 +114,13 @@ class TestFirewallaMSPClient:
     @pytest.mark.asyncio
     async def test_authenticate_connection_error(self, client, mock_aiohttp_session):
         """Test authentication with connection error."""
-        # Mock connection error
+        # Mock connection error with a proper OSError
         mock_aiohttp_session.request.side_effect = aiohttp.ClientConnectorError(
-            connection_key=None, os_error=None
+            connection_key=None, os_error=OSError("Connection refused")
         )
 
         result = await client.authenticate()
-        
+
         assert result is False
         assert client.is_authenticated is False
 
@@ -145,11 +146,12 @@ class TestFirewallaMSPClient:
         mock_aiohttp_session.request.return_value.__aenter__.return_value = mock_response
 
         result = await client.get_rules("status:active")
-        
+
         assert result == mock_api_responses["rules"]
-        # Verify query parameter was included in URL
+        # Verify query parameter was included in URL (positional arg: method, url)
         call_args = mock_aiohttp_session.request.call_args
-        assert "query=status:active" in call_args[1]["url"] or "query=status:active" in str(call_args)
+        url = call_args[0][1]
+        assert "query=status:active" in url
 
     @pytest.mark.asyncio
     async def test_pause_rule_success(self, client, mock_aiohttp_session, mock_api_responses):
@@ -220,7 +222,7 @@ class TestFirewallaMSPClient:
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_response.json.return_value = {"success": True}
-        
+
         mock_aiohttp_session.request.return_value.__aenter__.side_effect = [
             aiohttp.ServerTimeoutError(),
             mock_response,
@@ -228,9 +230,39 @@ class TestFirewallaMSPClient:
 
         with patch('asyncio.sleep', new_callable=AsyncMock):
             result = await client.get_rules()
-        
+
         assert result == {"success": True}
         assert mock_aiohttp_session.request.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_boxes_success(self, client, mock_aiohttp_session):
+        """Test successful box listing."""
+        boxes_response = [
+            {"gid": "box-aaa", "name": "Living Room Gold", "model": "gold", "online": True, "version": "1.975"},
+            {"gid": "box-bbb", "name": "Office Purple", "model": "purple", "online": True, "version": "1.975"},
+        ]
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json.return_value = boxes_response
+        mock_aiohttp_session.request.return_value.__aenter__.return_value = mock_response
+
+        result = await client.get_boxes()
+
+        assert len(result) == 2
+        assert result[0]["gid"] == "box-aaa"
+        assert result[1]["name"] == "Office Purple"
+
+    @pytest.mark.asyncio
+    async def test_get_boxes_empty(self, client, mock_aiohttp_session):
+        """Test get_boxes returns empty list when API returns non-list."""
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json.return_value = {"error": "not found"}
+        mock_aiohttp_session.request.return_value.__aenter__.return_value = mock_response
+
+        result = await client.get_boxes()
+
+        assert result == []
 
 
 class TestFirewallaDataUpdateCoordinator:
@@ -258,28 +290,35 @@ class TestFirewallaDataUpdateCoordinator:
         # Mock the API client methods
         coordinator.api.authenticate = AsyncMock(return_value=True)
         coordinator.api.get_rules = AsyncMock(return_value=mock_api_responses["rules"])
-        coordinator.api.is_authenticated = True
+        coordinator.api.get_boxes = AsyncMock(return_value=[
+            {"gid": "box-123", "name": "Firewalla Gold", "model": "gold", "online": True, "version": "1.975"},
+        ])
+        coordinator.api._authenticated = True
 
         result = await coordinator._async_update_data()
-        
+
         assert "rules" in result
         assert "rule_count" in result
         assert "box_info" in result
+        assert "boxes" in result
         assert len(result["rules"]) == 2
         assert result["rule_count"]["total"] == 2
         assert result["rule_count"]["active"] == 1
         assert result["rule_count"]["paused"] == 1
+        assert "box-123" in result["boxes"]
+        assert result["boxes"]["box-123"]["name"] == "Firewalla Gold"
 
     @pytest.mark.asyncio
     async def test_async_update_data_authentication_required(self, coordinator, mock_api_responses):
         """Test data update when authentication is required."""
         # Mock not authenticated initially
-        coordinator.api.is_authenticated = False
+        coordinator.api._authenticated = False
         coordinator.api.authenticate = AsyncMock(return_value=True)
         coordinator.api.get_rules = AsyncMock(return_value=mock_api_responses["rules"])
+        coordinator.api.get_boxes = AsyncMock(return_value=[])
 
         result = await coordinator._async_update_data()
-        
+
         # Should call authenticate first
         coordinator.api.authenticate.assert_called_once()
         assert "rules" in result
@@ -287,7 +326,7 @@ class TestFirewallaDataUpdateCoordinator:
     @pytest.mark.asyncio
     async def test_async_update_data_authentication_failed(self, coordinator):
         """Test data update when authentication fails."""
-        coordinator.api.is_authenticated = False
+        coordinator.api._authenticated = False
         coordinator.api.authenticate = AsyncMock(return_value=False)
 
         with pytest.raises(ConfigEntryAuthFailed):
@@ -296,8 +335,9 @@ class TestFirewallaDataUpdateCoordinator:
     @pytest.mark.asyncio
     async def test_async_update_data_api_error(self, coordinator):
         """Test data update with API error."""
-        coordinator.api.is_authenticated = True
+        coordinator.api._authenticated = True
         coordinator.api.get_rules = AsyncMock(side_effect=HomeAssistantError("API Error"))
+        coordinator.api.get_boxes = AsyncMock(return_value=[])
 
         with pytest.raises(UpdateFailed, match="API Error"):
             await coordinator._async_update_data()
