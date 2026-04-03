@@ -66,7 +66,7 @@ def mock_api_responses():
             ]
         },
         "pause_success": {"success": True},
-        "unpause_success": {"success": True},
+        "resume_success": {"success": True},
     }
 
 
@@ -165,16 +165,16 @@ class TestFirewallaMSPClient:
         mock_aiohttp_session.request.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_unpause_rule_success(self, client, mock_aiohttp_session, mock_api_responses):
-        """Test successful rule unpausing."""
+    async def test_resume_rule_success(self, client, mock_aiohttp_session, mock_api_responses):
+        """Test successful rule resuming."""
         mock_response = AsyncMock()
         mock_response.status = 200
-        mock_response.json.return_value = mock_api_responses["unpause_success"]
+        mock_response.json.return_value = mock_api_responses["resume_success"]
         mock_aiohttp_session.request.return_value.__aenter__.return_value = mock_response
 
-        result = await client.unpause_rule("rule-123")
-        
-        assert result == mock_api_responses["unpause_success"]
+        result = await client.resume_rule("rule-123")
+
+        assert result == mock_api_responses["resume_success"]
         mock_aiohttp_session.request.assert_called_once()
 
     @pytest.mark.asyncio
@@ -416,15 +416,15 @@ class TestFirewallaDataUpdateCoordinator:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_async_unpause_rule_success(self, coordinator):
-        """Test successful rule unpausing."""
-        coordinator.api.unpause_rule = AsyncMock(return_value={"success": True})
+    async def test_async_resume_rule_success(self, coordinator):
+        """Test successful rule resuming."""
+        coordinator.api.resume_rule = AsyncMock(return_value={"success": True})
         coordinator.async_request_refresh = AsyncMock()
 
-        result = await coordinator.async_unpause_rule("rule-123")
-        
+        result = await coordinator.async_resume_rule("rule-123")
+
         assert result is True
-        coordinator.api.unpause_rule.assert_called_once_with("rule-123")
+        coordinator.api.resume_rule.assert_called_once_with("rule-123")
         coordinator.async_request_refresh.assert_called_once()
 
     @pytest.mark.asyncio

@@ -27,7 +27,7 @@ The test suite provides comprehensive coverage for:
 - ✅ HTTP request handling with retry logic
 - ✅ Rate limiting and timeout handling
 - ✅ Authentication refresh on 401 errors
-- ✅ All API endpoints (boxes, devices, rules, create/pause/unpause)
+- ✅ All API endpoints (boxes, devices, rules, create/pause/resume)
 - ✅ Response parsing and error mapping
 
 ### 2. Data Update Coordinator (`test_coordinator.py`)

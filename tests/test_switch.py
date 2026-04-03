@@ -62,7 +62,7 @@ def mock_coordinator():
     }
     coordinator.box_gid = "box-123"
     coordinator.last_update_success = True
-    coordinator.async_unpause_rule = AsyncMock(return_value=True)
+    coordinator.async_resume_rule = AsyncMock(return_value=True)
     coordinator.async_pause_rule = AsyncMock(return_value=True)
     return coordinator
 
@@ -217,7 +217,7 @@ class TestFirewallaRuleSwitch:
         
         await switch.async_turn_on()
         
-        mock_coordinator.async_unpause_rule.assert_called_once_with(rule_id)
+        mock_coordinator.async_resume_rule.assert_called_once_with(rule_id)
 
     @pytest.mark.asyncio
     async def test_async_turn_on_active_rule(self, mock_coordinator):
@@ -232,8 +232,8 @@ class TestFirewallaRuleSwitch:
         
         await switch.async_turn_on()
         
-        # Should not call unpause for already active rule
-        mock_coordinator.async_unpause_rule.assert_not_called()
+        # Should not call resume for already active rule
+        mock_coordinator.async_resume_rule.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_async_turn_on_rule_not_found(self, mock_coordinator):

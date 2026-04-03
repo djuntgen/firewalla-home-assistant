@@ -154,71 +154,71 @@ class TestRealFirewallaMSPAPI:
             assert field in all_fields, f"Expected field '{field}' not found in rule data"
 
     @pytest.mark.asyncio
-    async def test_real_api_pause_unpause_cycle(self, real_msp_client):
-        """Test pause/unpause cycle with a real rule (if safe to do so)."""
+    async def test_real_api_pause_resume_cycle(self, real_msp_client):
+        """Test pause/resume cycle with a real rule (if safe to do so)."""
         # Authenticate first
         auth_result = await real_msp_client.authenticate()
         assert auth_result is True
-        
+
         # Get rules to find one we can safely test with
         rules_response = await real_msp_client.get_rules()
-        
+
         # Extract rules list
         rules_list = []
         if isinstance(rules_response, dict) and "results" in rules_response:
             rules_list = rules_response["results"]
         elif isinstance(rules_response, list):
             rules_list = rules_response
-        
+
         if not rules_list:
-            pytest.skip("No rules available for pause/unpause testing")
-        
+            pytest.skip("No rules available for pause/resume testing")
+
         # Find a rule that's currently active (not paused) for testing
         test_rule = None
         for rule in rules_list:
             if isinstance(rule, dict) and not rule.get("paused", False):
                 test_rule = rule
                 break
-        
+
         if not test_rule:
-            pytest.skip("No active rules available for pause/unpause testing")
-        
+            pytest.skip("No active rules available for pause/resume testing")
+
         rule_id = test_rule.get("id")
         assert rule_id, "Test rule must have an ID"
-        
-        print(f"\nTesting pause/unpause cycle with rule: {rule_id}")
+
+        print(f"\nTesting pause/resume cycle with rule: {rule_id}")
         print(f"Rule type: {test_rule.get('type')}")
         print(f"Rule value: {test_rule.get('value')}")
-        
+
         try:
             # Test pause operation
             print("Testing pause operation...")
             pause_result = await real_msp_client.pause_rule(rule_id)
             print(f"Pause result: {pause_result}")
-            
+
             # Wait a moment for the change to propagate
             await asyncio.sleep(2)
-            
+
             # Verify rule is paused by getting its status
             rule_status = await real_msp_client.get_rule_status(rule_id)
             print(f"Rule status after pause: {rule_status}")
-            
-            # Test unpause operation
-            print("Testing unpause operation...")
-            unpause_result = await real_msp_client.unpause_rule(rule_id)
-            print(f"Unpause result: {unpause_result}")
-            
+
+            # Test resume operation
+            print("Testing resume operation...")
+            resume_result = await real_msp_client.resume_rule(rule_id)
+            print(f"Resume result: {resume_result}")
+
             # Wait a moment for the change to propagate
             await asyncio.sleep(2)
-            
-            # Verify rule is unpaused
+
+            # Verify rule is resumed
             final_status = await real_msp_client.get_rule_status(rule_id)
-            print(f"Rule status after unpause: {final_status}")
-            
+            print(f"Rule status after resume: {final_status}")
+
         except Exception as e:
-            print(f"Error during pause/unpause testing: {e}")
-            # Don't fail the test if we can't safely test pause/unpause
-            pytest.skip(f"Cannot safely test pause/unpause: {e}")
+            print(f"Error during pause/resume testing: {e}")
+            # Don't fail the test if we can't safely test pause/resume
+            pytest.skip(f"Cannot safely test pause/resume: {e}")
 
     @pytest.mark.asyncio
     async def test_real_api_error_handling(self, real_api_session):

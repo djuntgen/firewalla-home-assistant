@@ -243,10 +243,10 @@ class TestCoordinatorErrorHandling:
             await coordinator.async_pause_rule("")
 
     @pytest.mark.asyncio
-    async def test_unpause_rule_empty_id(self, coordinator):
-        """Test rule unpausing with empty rule ID."""
+    async def test_resume_rule_empty_id(self, coordinator):
+        """Test rule resuming with empty rule ID."""
         with pytest.raises(ValueError, match="Rule ID cannot be empty"):
-            await coordinator.async_unpause_rule("")
+            await coordinator.async_resume_rule("")
 
 
 class TestConfigFlowErrorHandling:

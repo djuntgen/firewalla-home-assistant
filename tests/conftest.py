@@ -205,8 +205,8 @@ def mock_api_responses():
             "success": True,
             "data": {"message": "Rule paused successfully"}
         },
-        "unpause_rule": {
+        "resume_rule": {
             "success": True,
-            "data": {"message": "Rule unpaused successfully"}
+            "data": {"message": "Rule resumed successfully"}
         },
     }
