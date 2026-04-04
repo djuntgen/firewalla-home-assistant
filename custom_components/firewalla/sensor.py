@@ -289,8 +289,7 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
         user_name = user_data["user_name"] if user_data else f"User {user_scope_id}"
         app_name = (limit_data["app"] if limit_data else "unknown").title()
         self._attr_unique_id = f"firewalla_timelimit_{user_scope_id}_{rule_id}"
-        self._attr_name = f"{user_name} {app_name} Time"
-        self._attr_icon = "mdi:timer-outline"
+        self._attr_name = f"{user_name} {app_name} Time Left"
         # Attach to the user's affiliated group device
         affiliated_group = user_data.get("affiliated_group", "") if user_data else ""
         group_data = None
@@ -325,7 +324,16 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> int:
         limit = self._get_limit_data()
-        return limit.get("used", 0) if limit else 0
+        if not limit:
+            return 0
+        return limit.get("remaining", 0)
+
+    @property
+    def icon(self) -> str:
+        limit = self._get_limit_data()
+        if limit and limit.get("reached"):
+            return "mdi:timer-alert"
+        return "mdi:timer-outline"
 
     @property
     def available(self) -> bool:

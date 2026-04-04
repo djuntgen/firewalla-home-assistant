@@ -326,22 +326,41 @@ class TestFirewallaTimeLimitSensor:
         assert sensor._attr_unique_id == "firewalla_timelimit_33_r1"
         assert "Harvey" in sensor._attr_name
         assert "Roblox" in sensor._attr_name
+        assert "Time Left" in sensor._attr_name
         assert sensor._attr_has_entity_name is True
 
-    def test_native_value_minutes_used(self):
+    def test_native_value_remaining(self):
         from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
         time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {
             "r1": {"app": "roblox", "quota": 60, "used": 45, "remaining": 15, "reached": False,
                    "paused": False, "schedule_display": None, "hit_count": 0}}}}
         coordinator = self._make_coordinator(time_limits=time_limits)
         sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
-        assert sensor.native_value == 45
+        assert sensor.native_value == 15
 
     def test_native_value_missing(self):
         from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
         coordinator = self._make_coordinator(time_limits={})
         sensor = FirewallaTimeLimitSensor(coordinator, "99", "r1")
         assert sensor.native_value == 0
+
+    def test_icon_when_reached(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {
+            "r1": {"app": "roblox", "quota": 60, "used": 61, "remaining": 0, "reached": True,
+                   "paused": False, "schedule_display": None, "hit_count": 0}}}}
+        coordinator = self._make_coordinator(time_limits=time_limits)
+        sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
+        assert sensor.icon == "mdi:timer-alert"
+
+    def test_icon_when_not_reached(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {
+            "r1": {"app": "roblox", "quota": 60, "used": 30, "remaining": 30, "reached": False,
+                   "paused": False, "schedule_display": None, "hit_count": 0}}}}
+        coordinator = self._make_coordinator(time_limits=time_limits)
+        sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
+        assert sensor.icon == "mdi:timer-outline"
 
     def test_available_true(self):
         from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
