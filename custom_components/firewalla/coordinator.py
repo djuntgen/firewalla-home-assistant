@@ -27,6 +27,62 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _format_schedule(schedule: dict | None) -> str | None:
+    """Convert cron schedule to human-readable text."""
+    if not schedule:
+        return None
+
+    cron = schedule.get("cronTime", "")
+    duration = schedule.get("duration", 0)
+
+    if not cron:
+        return None
+
+    # Parse cron: minute hour dom month dow
+    parts = cron.split()
+    if len(parts) < 5:
+        return cron  # Return raw if unparseable
+
+    minute, hour, dom, month, dow = parts[:5]
+
+    # Format time
+    try:
+        time_str = f"{int(hour):02d}:{int(minute):02d}" if hour != "*" and minute != "*" else "every hour"
+    except ValueError:
+        time_str = f"{hour}:{minute}"
+
+    # Format days
+    day_map = {"0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat", "7": "Sun"}
+    if dow == "*":
+        day_str = "daily"
+    else:
+        days = [day_map.get(d.strip(), d.strip()) for d in dow.split(",")]
+        if len(days) == 7:
+            day_str = "daily"
+        elif len(days) == 5 and all(d in ["Mon", "Tue", "Wed", "Thu", "Fri"] for d in days):
+            day_str = "weekdays"
+        elif len(days) == 2 and all(d in ["Sat", "Sun"] for d in days):
+            day_str = "weekends"
+        else:
+            day_str = ", ".join(days)
+
+    # Format duration
+    if duration > 0:
+        hours = duration // 3600
+        mins = (duration % 3600) // 60
+        if hours >= 24:
+            dur_str = "all day"
+        elif hours > 0 and mins > 0:
+            dur_str = f"for {hours}h {mins}m"
+        elif hours > 0:
+            dur_str = f"for {hours}h"
+        else:
+            dur_str = f"for {mins}m"
+        return f"{day_str} at {time_str} {dur_str}"
+
+    return f"{day_str} at {time_str}"
+
+
 class FirewallaMSPClient:
     """Client for Firewalla MSP API communication focused on rule management."""
 
@@ -579,6 +635,23 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     "hit": rule_info.get("hit", {}),
                     "gid": rule_info.get("gid", ""),
                 }
+
+                # Extract hit data
+                hit_info = rule_info.get("hit", {})
+                processed_rule["hit_count"] = hit_info.get("count", 0) if isinstance(hit_info, dict) else 0
+                processed_rule["last_hit"] = hit_info.get("lastHitTs") if isinstance(hit_info, dict) else None
+
+                # Extract time usage (for timelimit rules)
+                time_usage = rule_info.get("timeUsage", {})
+                if isinstance(time_usage, dict) and time_usage:
+                    processed_rule["time_quota_minutes"] = time_usage.get("quota")
+                    processed_rule["time_used_minutes"] = time_usage.get("used")
+                else:
+                    processed_rule["time_quota_minutes"] = None
+                    processed_rule["time_used_minutes"] = None
+
+                # Format schedule for display
+                processed_rule["schedule_display"] = _format_schedule(rule_info.get("schedule"))
 
                 # Include all original fields
                 for key, value in rule_info.items():

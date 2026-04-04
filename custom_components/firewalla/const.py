@@ -88,12 +88,16 @@ ENTITY_ID_FORMATS = {
 # Rule types from Firewalla API
 RULE_TYPES = {
     "internet": "Internet Access",
-    "category": "Category Block",
-    "domain": "Domain Block",
-    "device": "Device Block",
-    "gaming": "Gaming Block",
+    "category": "Category",
+    "domain": "Domain",
+    "device": "Device",
+    "gaming": "Gaming",
     "time": "Time-based Rule",
-    "app": "Application Block",
+    "app": "Application",
+    "intranet": "Intranet Access",
+    "targetlist": "Target List",
+    "region": "Region",
+    "ip": "IP Address",
 }
 
 # Rule actions
@@ -101,6 +105,7 @@ RULE_ACTIONS = {
     "block": "Block",
     "allow": "Allow",
     "qos": "QoS",
+    "timelimit": "Time Limit",
 }
 
 # Rule status values
@@ -153,9 +158,17 @@ RULE_ATTRIBUTES = [
     "action",
     "priority",
     "schedule",
+    "schedule_display",
     "created_at",
     "modified_at",
     "description",
+    "hit_count",
+    "last_hit",
+    "time_quota_minutes",
+    "time_used_minutes",
+    "scope_type",
+    "scope_value",
+    "direction",
 ]
 
 # Sensor attributes for rules summary

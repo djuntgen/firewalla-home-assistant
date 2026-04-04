@@ -15,6 +15,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -57,14 +59,14 @@ async def async_setup_entry(
             _LOGGER.error("Error creating rules summary sensor: %s", err)
 
         if entities:
-            async_add_entities(entities, True)
+            async_add_entities(entities)
             _LOGGER.info(
                 "Successfully added %d Firewalla rule statistics sensor entities",
                 len(entities),
             )
         else:
             _LOGGER.warning("No valid rule statistics sensor entities could be created")
-            async_add_entities([], True)
+            async_add_entities([])
 
     except KeyError as err:
         _LOGGER.error(
@@ -88,6 +90,11 @@ async def async_setup_entry(
 class FirewallaRulesSensor(CoordinatorEntity, SensorEntity):
     """Sensor entity for Firewalla rules summary and statistics."""
 
+    _attr_has_entity_name = True
+    _unrecorded_attributes = frozenset({
+        "box_name", "box_model", "rules_by_type",
+    })
+
     def __init__(self, coordinator: FirewallaDataUpdateCoordinator) -> None:
         """Initialize the rules summary sensor."""
         super().__init__(coordinator)
@@ -99,11 +106,12 @@ class FirewallaRulesSensor(CoordinatorEntity, SensorEntity):
         # Set state class for numeric count
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "rules"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
         # Set device info
         self._attr_device_info = self._get_device_info()
 
-    def _get_device_info(self) -> Dict[str, Any]:
+    def _get_device_info(self) -> DeviceInfo:
         """Get device info for the Firewalla box."""
         box_info = {}
         if self.coordinator.data and "box_info" in self.coordinator.data:
@@ -113,15 +121,15 @@ class FirewallaRulesSensor(CoordinatorEntity, SensorEntity):
         box_name = box_info.get("name", f"Firewalla Box {box_gid[:8]}")
         box_model = box_info.get("model", "unknown")
 
-        return {
-            "identifiers": {(DOMAIN, box_gid)},
-            "name": box_name,
-            "manufacturer": DEVICE_MANUFACTURER,
-            "model": DEVICE_MODEL_MAPPINGS.get(
+        return DeviceInfo(
+            identifiers={(DOMAIN, box_gid)},
+            name=box_name,
+            manufacturer=DEVICE_MANUFACTURER,
+            model=DEVICE_MODEL_MAPPINGS.get(
                 box_model, f"Firewalla {box_model.title()}"
             ),
-            "sw_version": box_info.get("version"),
-        }
+            sw_version=box_info.get("version"),
+        )
 
     @property
     def native_value(self) -> int:
