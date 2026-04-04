@@ -15,6 +15,7 @@ from custom_components.firewalla.switch import (
     _format_schedule,
 )
 from custom_components.firewalla.const import DOMAIN
+from custom_components.firewalla.coordinator import FirewallaDataUpdateCoordinator
 
 
 # ---------------------------------------------------------------------------
@@ -816,3 +817,113 @@ class TestAsyncSetupEntry:
         # Only 2 valid rules should become entities, not the bad one
         entities = async_add_entities.call_args[0][0]
         assert len(entities) == 2
+
+
+# ---------------------------------------------------------------------------
+# FirewallaGroupInternetSwitch
+# ---------------------------------------------------------------------------
+
+
+class TestFirewallaGroupInternetSwitch:
+    """Tests for group internet access switch."""
+
+    def _make_coordinator(self, groups=None, rules=None):
+        coordinator = MagicMock(spec=FirewallaDataUpdateCoordinator)
+        coordinator.data = {
+            "groups": groups or {},
+            "rules": rules or {},
+            "box_info": {"gid": "test-box", "name": "Test Box", "model": "gold"},
+        }
+        coordinator.last_update_success = True
+        coordinator.box_gid = "test-box"
+        return coordinator
+
+    def test_init(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29",
+                         "device_count": 5, "devices": [], "internet_block_rule_id": "rule1",
+                         "internet_blocked": True, "rule_count": 6, "download": 1000, "upload": 500}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        assert switch._attr_unique_id == "firewalla_group_28_internet"
+        assert "Matt" in switch._attr_name
+        assert switch._attr_has_entity_name is True
+
+    def test_is_on_internet_allowed(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": False,
+                         "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "rule_count": 1, "download": 0, "upload": 0}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        assert switch.is_on is True
+
+    def test_is_on_internet_blocked(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": True,
+                         "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "rule_count": 1, "download": 0, "upload": 0}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        assert switch.is_on is False
+
+    def test_available_with_rule(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": True,
+                         "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "rule_count": 1, "download": 0, "upload": 0}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        assert switch.available is True
+
+    def test_unavailable_without_rule(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "internet_block_rule_id": None, "internet_blocked": False,
+                         "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "rule_count": 0, "download": 0, "upload": 0}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        assert switch.available is False
+
+    @pytest.mark.asyncio
+    async def test_turn_on_pauses_block_rule(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": True,
+                         "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "rule_count": 1, "download": 0, "upload": 0}}
+        rules = {"rule1": {"id": "rule1", "paused": False, "status": "active"}}
+        coordinator = self._make_coordinator(groups=groups, rules=rules)
+        coordinator.async_pause_rule = AsyncMock(return_value=True)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        switch.async_write_ha_state = MagicMock()
+        await switch.async_turn_on()
+        coordinator.async_pause_rule.assert_awaited_once_with("rule1")
+        assert groups["28"]["internet_blocked"] is False
+
+    @pytest.mark.asyncio
+    async def test_turn_off_resumes_block_rule(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": False,
+                         "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "rule_count": 1, "download": 0, "upload": 0}}
+        rules = {"rule1": {"id": "rule1", "paused": True, "status": "paused"}}
+        coordinator = self._make_coordinator(groups=groups, rules=rules)
+        coordinator.async_resume_rule = AsyncMock(return_value=True)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        switch.async_write_ha_state = MagicMock()
+        await switch.async_turn_off()
+        coordinator.async_resume_rule.assert_awaited_once_with("rule1")
+        assert groups["28"]["internet_blocked"] is True
+
+    def test_extra_state_attributes(self):
+        from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29",
+                         "device_count": 5, "devices": [], "internet_block_rule_id": "rule1",
+                         "internet_blocked": True, "rule_count": 6, "download": 1000, "upload": 500}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupInternetSwitch(coordinator, "28")
+        attrs = switch.extra_state_attributes
+        assert attrs["group_id"] == "28"
+        assert attrs["group_name"] == "Matt"
+        assert attrs["device_count"] == 5
+        assert attrs["download"] == 1000
