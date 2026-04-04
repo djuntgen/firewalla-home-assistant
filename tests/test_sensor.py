@@ -11,6 +11,7 @@ from custom_components.firewalla.sensor import (
     async_setup_entry,
 )
 from custom_components.firewalla.const import DOMAIN, ENTITY_ID_FORMATS
+from custom_components.firewalla.coordinator import FirewallaDataUpdateCoordinator
 
 
 @pytest.fixture
@@ -297,3 +298,76 @@ class TestAsyncSetupEntry:
 
         # Should still be called with empty list (no True argument)
         async_add_entities.assert_called_once_with([])
+
+
+class TestFirewallaGroupSensor:
+    """Tests for group sensor entity."""
+
+    def _make_coordinator(self, groups=None):
+        coordinator = MagicMock(spec=FirewallaDataUpdateCoordinator)
+        coordinator.data = {
+            "groups": groups or {},
+            "box_info": {"gid": "test-box", "name": "Test Box", "model": "gold"},
+        }
+        coordinator.last_update_success = True
+        coordinator.box_gid = "test-box"
+        return coordinator
+
+    def test_init(self):
+        from custom_components.firewalla.sensor import FirewallaGroupSensor
+        groups = {"28": {"name": "Matt", "device_count": 5, "devices": [
+            {"name": "Phone", "online": True, "mac": "AA", "type": "phone", "ip": "1.1.1.1"},
+            {"name": "Tablet", "online": False, "mac": "BB", "type": "tablet", "ip": "1.1.1.2"}],
+            "is_user_group": True, "user_id": "box:29", "internet_blocked": True,
+            "internet_block_rule_id": "rule1", "rule_count": 6, "download": 1000, "upload": 500}}
+        coordinator = self._make_coordinator(groups=groups)
+        sensor = FirewallaGroupSensor(coordinator, "28")
+        assert sensor._attr_unique_id == "firewalla_group_28"
+        assert "Matt" in sensor._attr_name
+        assert sensor._attr_has_entity_name is True
+
+    def test_native_value_is_device_count(self):
+        from custom_components.firewalla.sensor import FirewallaGroupSensor
+        groups = {"28": {"name": "Matt", "device_count": 5, "devices": [],
+                         "is_user_group": True, "user_id": None, "internet_blocked": False,
+                         "internet_block_rule_id": None, "rule_count": 0, "download": 0, "upload": 0}}
+        coordinator = self._make_coordinator(groups=groups)
+        sensor = FirewallaGroupSensor(coordinator, "28")
+        assert sensor.native_value == 5
+
+    def test_native_value_missing_group(self):
+        from custom_components.firewalla.sensor import FirewallaGroupSensor
+        coordinator = self._make_coordinator(groups={})
+        sensor = FirewallaGroupSensor(coordinator, "99")
+        assert sensor.native_value == 0
+
+    def test_available(self):
+        from custom_components.firewalla.sensor import FirewallaGroupSensor
+        groups = {"28": {"name": "Matt", "device_count": 1, "devices": [],
+                         "is_user_group": True, "user_id": None, "internet_blocked": False,
+                         "internet_block_rule_id": None, "rule_count": 0, "download": 0, "upload": 0}}
+        coordinator = self._make_coordinator(groups=groups)
+        sensor = FirewallaGroupSensor(coordinator, "28")
+        assert sensor.available is True
+
+    def test_unavailable_missing_group(self):
+        from custom_components.firewalla.sensor import FirewallaGroupSensor
+        coordinator = self._make_coordinator(groups={})
+        sensor = FirewallaGroupSensor(coordinator, "99")
+        assert sensor.available is False
+
+    def test_extra_state_attributes(self):
+        from custom_components.firewalla.sensor import FirewallaGroupSensor
+        devices = [{"name": "Phone", "online": True, "mac": "AA:BB", "type": "phone", "ip": "1.2.3.4"},
+                    {"name": "Tablet", "online": False, "mac": "CC:DD", "type": "tablet", "ip": "1.2.3.5"}]
+        groups = {"28": {"name": "Matt", "device_count": 2, "devices": devices,
+                         "is_user_group": True, "user_id": "box:29", "internet_blocked": True,
+                         "internet_block_rule_id": "rule1", "rule_count": 6, "download": 1000, "upload": 500}}
+        coordinator = self._make_coordinator(groups=groups)
+        sensor = FirewallaGroupSensor(coordinator, "28")
+        attrs = sensor.extra_state_attributes
+        assert attrs["online_devices"] == 1
+        assert attrs["device_names"] == ["Phone", "Tablet"]
+        assert attrs["internet_blocked"] is True
+        assert attrs["rule_count"] == 6
+        assert attrs["download"] == 1000
