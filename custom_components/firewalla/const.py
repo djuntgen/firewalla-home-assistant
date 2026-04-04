@@ -25,16 +25,12 @@ API_ENDPOINTS = {
     "rule_pause": "/rules/{rule_id}/pause",
     "rule_resume": "/rules/{rule_id}/resume",
     "rule_detail": "/rules/{rule_id}",
-    
     # V1 endpoints (legacy, for fallback)
     "legacy_rules": "/rule/list",
 }
 
 # Rule filtering options
-DEFAULT_RULE_FILTERS = {
-    "include_filters": [],
-    "exclude_filters": []
-}
+DEFAULT_RULE_FILTERS = {"include_filters": [], "exclude_filters": []}
 
 # Common rule filter examples for users
 RULE_FILTER_EXAMPLES = {
@@ -48,7 +44,7 @@ RULE_FILTER_EXAMPLES = {
     },
     "type_filters": {
         "app_rules_only": "target.type:app",
-        "category_rules_only": "target.type:category", 
+        "category_rules_only": "target.type:category",
         "domain_rules_only": "target.type:domain",
         "ip_rules_only": "target.type:ip",
         "internet_rules_only": "target.type:internet",
@@ -61,13 +57,13 @@ RULE_FILTER_EXAMPLES = {
         "exclude_paused": "-status:paused",
         "exclude_allow_rules": "-action:allow",
         "exclude_category_rules": "-target.type:category",
-    }
+    },
 }
 
 # Query parameters for rule discovery
 RULE_QUERY_PARAMS = {
     "status_active": "status:active",
-    "status_paused": "status:paused", 
+    "status_paused": "status:paused",
     "action_allow": "action:allow",
     "action_block": "action:block",
 }
@@ -92,7 +88,7 @@ ENTITY_ID_FORMATS = {
 # Rule types from Firewalla API
 RULE_TYPES = {
     "internet": "Internet Access",
-    "category": "Category Block", 
+    "category": "Category Block",
     "domain": "Domain Block",
     "device": "Device Block",
     "gaming": "Gaming Block",
@@ -110,14 +106,14 @@ RULE_ACTIONS = {
 # Rule status values
 RULE_STATUS = {
     "active": "Active",
-    "paused": "Paused", 
+    "paused": "Paused",
     "disabled": "Disabled",
 }
 
 # Target type prefixes
 TARGET_PREFIXES = {
     "mac": "MAC Address",
-    "ip": "IP Address", 
+    "ip": "IP Address",
     "category": "Category",
     "domain": "Domain",
     "app": "Application",
@@ -130,7 +126,7 @@ PLATFORMS = ["switch", "sensor"]
 DEVICE_MANUFACTURER = "Firewalla"
 DEVICE_MODEL_MAPPINGS = {
     "gold": "Firewalla Gold",
-    "purple": "Firewalla Purple", 
+    "purple": "Firewalla Purple",
     "blue": "Firewalla Blue",
     "red": "Firewalla Red",
     "gold_se": "Firewalla Gold SE",
@@ -151,7 +147,7 @@ ERROR_MESSAGES = {
 # Rule attribute keys for entity attributes
 RULE_ATTRIBUTES = [
     "rule_id",
-    "rule_type", 
+    "rule_type",
     "target",
     "target_name",
     "action",
@@ -166,7 +162,7 @@ RULE_ATTRIBUTES = [
 SENSOR_ATTRIBUTES = [
     "total_rules",
     "active_rules",
-    "paused_rules", 
+    "paused_rules",
     "rules_by_type",
     "last_updated",
     "api_status",

@@ -1,4 +1,5 @@
 """Common test fixtures for Firewalla integration tests."""
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.core import HomeAssistant
@@ -115,13 +116,13 @@ def mock_coordinator_data(mock_box_info, mock_devices_data, mock_rules_data):
 def mock_aiohttp_session():
     """Return a mock aiohttp session."""
     session = AsyncMock(spec=aiohttp.ClientSession)
-    
+
     # Mock successful API responses
     mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.json = AsyncMock()
     mock_response.text = AsyncMock(return_value="")
-    
+
     session.request = AsyncMock(return_value=mock_response)
     return session
 
@@ -148,7 +149,7 @@ def mock_api_responses():
                     "online": True,
                     "version": "1.975",
                 }
-            }
+            },
         },
         "box_info": {
             "success": True,
@@ -159,7 +160,7 @@ def mock_api_responses():
                 "online": True,
                 "version": "1.975",
                 "lastSeen": 1648632679193,
-            }
+            },
         },
         "devices": {
             "success": True,
@@ -172,7 +173,7 @@ def mock_api_responses():
                     "lastActiveTimestamp": 1648632679.193,
                     "deviceClass": "laptop",
                 }
-            }
+            },
         },
         "rules": {
             "success": True,
@@ -186,7 +187,7 @@ def mock_api_responses():
                     "action": "block",
                     "description": "Block internet for Test Device 1",
                 }
-            }
+            },
         },
         "create_rule": {
             "success": True,
@@ -199,14 +200,14 @@ def mock_api_responses():
                 "paused": False,
                 "action": "block",
                 "description": "New block rule",
-            }
+            },
         },
         "pause_rule": {
             "success": True,
-            "data": {"message": "Rule paused successfully"}
+            "data": {"message": "Rule paused successfully"},
         },
         "resume_rule": {
             "success": True,
-            "data": {"message": "Rule resumed successfully"}
+            "data": {"message": "Rule resumed successfully"},
         },
     }
