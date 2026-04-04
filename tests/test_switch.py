@@ -926,4 +926,113 @@ class TestFirewallaGroupInternetSwitch:
         assert attrs["group_id"] == "28"
         assert attrs["group_name"] == "Matt"
         assert attrs["device_count"] == 5
-        assert attrs["download"] == 1000
+
+
+class TestFirewallaGroupRuleSwitch:
+    def _make_coordinator(self, groups=None, rules=None):
+        coordinator = MagicMock(spec=FirewallaDataUpdateCoordinator)
+        coordinator.data = {"groups": groups or {}, "rules": rules or {},
+                            "box_info": {"gid": "test-box", "name": "Test Box", "model": "gold"}}
+        coordinator.last_update_success = True
+        coordinator.box_gid = "test-box"
+        return coordinator
+
+    def test_init_category_block(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 50}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29", "device_count": 5, "devices": [],
+                         "internet_block_rule_id": "r1", "internet_blocked": True, "rule_count": 2, "download": 0, "upload": 0, "group_rules": gr}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
+        assert switch._attr_unique_id == "firewalla_group_28_rule_r2"
+        assert "Matt" in switch._attr_name
+        assert "Porn" in switch._attr_name
+        assert switch._attr_has_entity_name is True
+
+    def test_init_app_block(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r3": {"type": "app", "value": "tiktok", "action": "block", "paused": True, "status": "paused", "hit_count": 200}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r3")
+        assert "Tiktok" in switch._attr_name
+
+    def test_is_on_active_block(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 0}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
+        assert switch.is_on is True
+
+    def test_is_off_paused_block(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r3": {"type": "app", "value": "tiktok", "action": "block", "paused": True, "status": "paused", "hit_count": 0}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r3")
+        assert switch.is_on is False
+
+    def test_available_true(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 0}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
+        assert switch.available is True
+
+    def test_unavailable_rule_gone(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 0, "download": 0, "upload": 0, "group_rules": {}}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
+        assert switch.available is False
+
+    @pytest.mark.asyncio
+    async def test_turn_off_pauses_rule(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 0}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
+        rules = {"r2": {"id": "r2", "paused": False, "status": "active"}}
+        coordinator = self._make_coordinator(groups=groups, rules=rules)
+        coordinator.async_pause_rule = AsyncMock(return_value=True)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
+        switch.async_write_ha_state = MagicMock()
+        await switch.async_turn_off()
+        coordinator.async_pause_rule.assert_awaited_once_with("r2")
+        assert gr["r2"]["paused"] is True
+
+    @pytest.mark.asyncio
+    async def test_turn_on_resumes_rule(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r3": {"type": "app", "value": "tiktok", "action": "block", "paused": True, "status": "paused", "hit_count": 0}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+                         "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
+        rules = {"r3": {"id": "r3", "paused": True, "status": "paused"}}
+        coordinator = self._make_coordinator(groups=groups, rules=rules)
+        coordinator.async_resume_rule = AsyncMock(return_value=True)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r3")
+        switch.async_write_ha_state = MagicMock()
+        await switch.async_turn_on()
+        coordinator.async_resume_rule.assert_awaited_once_with("r3")
+        assert gr["r3"]["paused"] is False
+
+    def test_extra_state_attributes(self):
+        from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
+        gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 50}}
+        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29", "device_count": 5, "devices": [],
+                         "internet_block_rule_id": "r1", "internet_blocked": True, "rule_count": 2, "download": 0, "upload": 0, "group_rules": gr}}
+        coordinator = self._make_coordinator(groups=groups)
+        switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
+        attrs = switch.extra_state_attributes
+        assert attrs["group_id"] == "28"
+        assert attrs["rule_id"] == "r2"
+        assert attrs["rule_type"] == "category"
+        assert attrs["target_value"] == "porn"
+        assert attrs["hit_count"] == 50

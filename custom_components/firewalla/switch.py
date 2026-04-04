@@ -163,6 +163,7 @@ async def async_setup_entry(
     ]
     known_rule_ids: set[str] = set()
     known_group_ids: set[str] = set()
+    known_group_rule_keys: set[tuple[str, str]] = set()
 
     @callback
     def _async_update_entities() -> None:
@@ -219,6 +220,30 @@ async def async_setup_entry(
                 if entity_id:
                     ent_reg.async_remove(entity_id)
             known_group_ids.difference_update(removed_groups)
+
+        # --- Group rule switches (category/app blocks, excluding internet) ---
+        current_group_rule_keys: set[tuple[str, str]] = set()
+        if coordinator.data and "groups" in coordinator.data:
+            for gid, gdata in coordinator.data["groups"].items():
+                internet_rule_id = gdata.get("internet_block_rule_id")
+                for rid in gdata.get("group_rules", {}):
+                    if rid != internet_rule_id:  # Skip internet — has its own switch
+                        current_group_rule_keys.add((gid, rid))
+
+        new_group_rules = current_group_rule_keys - known_group_rule_keys
+        if new_group_rules:
+            new_entities = [FirewallaGroupRuleSwitch(coordinator, gid, rid) for gid, rid in new_group_rules]
+            async_add_entities(new_entities)
+            known_group_rule_keys.update(new_group_rules)
+
+        removed_group_rules = known_group_rule_keys - current_group_rule_keys
+        if removed_group_rules:
+            ent_reg = er.async_get(hass)
+            for gid, rid in removed_group_rules:
+                entity_id = ent_reg.async_get_entity_id("switch", DOMAIN, f"firewalla_group_{gid}_rule_{rid}")
+                if entity_id:
+                    ent_reg.async_remove(entity_id)
+            known_group_rule_keys.difference_update(removed_group_rules)
 
     # Perform the initial sync, then listen for coordinator updates.
     _async_update_entities()
@@ -585,4 +610,103 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
         if rule:
             rule["paused"] = False
             rule["status"] = "active"
+        self.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
+# Group Rule Switch (category/app blocks)
+# ---------------------------------------------------------------------------
+
+
+class FirewallaGroupRuleSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch for a group-scoped block rule (category/app). ON=block active, OFF=block paused."""
+
+    _attr_has_entity_name = True
+    _unrecorded_attributes = frozenset({"group_id", "rule_id", "rule_type", "target_value", "hit_count"})
+
+    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, group_id: str, rule_id: str) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+        self._rule_id = rule_id
+        group = self._get_group_data()
+        rule_info = self._get_rule_info()
+        group_name = group["name"] if group else group_id
+        target = (rule_info["value"] if rule_info else "unknown").title()
+        self._attr_unique_id = f"firewalla_group_{group_id}_rule_{rule_id}"
+        self._attr_name = f"{group_name} {target} Block"
+        self._attr_icon = "mdi:shield-lock"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"group_{group_id}")},
+            name=f"Firewalla Group: {group_name}",
+            manufacturer=DEVICE_MANUFACTURER,
+            model="Group",
+            via_device=(DOMAIN, coordinator.box_gid),
+        )
+
+    def _get_group_data(self) -> dict[str, Any] | None:
+        if not self.coordinator.data or "groups" not in self.coordinator.data:
+            return None
+        return self.coordinator.data["groups"].get(self._group_id)
+
+    def _get_rule_info(self) -> dict[str, Any] | None:
+        group = self._get_group_data()
+        if not group:
+            return None
+        return group.get("group_rules", {}).get(self._rule_id)
+
+    @property
+    def is_on(self) -> bool:
+        rule_info = self._get_rule_info()
+        if not rule_info:
+            return False
+        return not rule_info.get("paused", False)
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._get_rule_info() is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        rule_info = self._get_rule_info()
+        if not rule_info:
+            return {"group_id": self._group_id, "rule_id": self._rule_id}
+        return {
+            "group_id": self._group_id,
+            "rule_id": self._rule_id,
+            "rule_type": rule_info.get("type", ""),
+            "target_value": rule_info.get("value", ""),
+            "action": rule_info.get("action", ""),
+            "hit_count": rule_info.get("hit_count", 0),
+        }
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Activate the block rule (resume it)."""
+        rule_info = self._get_rule_info()
+        if not rule_info:
+            raise HomeAssistantError(f"Rule {self._rule_id} not found")
+        success = await self.coordinator.async_resume_rule(self._rule_id)
+        if not success:
+            raise HomeAssistantError(f"Failed to resume rule {self._rule_id}")
+        rule_info["paused"] = False
+        rule_info["status"] = "active"
+        rule = self.coordinator.data.get("rules", {}).get(self._rule_id)
+        if rule:
+            rule["paused"] = False
+            rule["status"] = "active"
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Deactivate the block rule (pause it)."""
+        rule_info = self._get_rule_info()
+        if not rule_info:
+            raise HomeAssistantError(f"Rule {self._rule_id} not found")
+        success = await self.coordinator.async_pause_rule(self._rule_id)
+        if not success:
+            raise HomeAssistantError(f"Failed to pause rule {self._rule_id}")
+        rule_info["paused"] = True
+        rule_info["status"] = "paused"
+        rule = self.coordinator.data.get("rules", {}).get(self._rule_id)
+        if rule:
+            rule["paused"] = True
+            rule["status"] = "paused"
         self.async_write_ha_state()
