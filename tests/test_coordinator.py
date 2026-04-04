@@ -608,3 +608,37 @@ class TestFormatSchedule:
         """Test that a cron string with fewer than 5 parts returns raw."""
         result = _format_schedule({"cronTime": "0 0 *"})
         assert result == "0 0 *"
+
+
+class TestFirewallaMSPClientDevicesUsers:
+    """Tests for devices and users API methods."""
+
+    @pytest.mark.asyncio
+    async def test_get_devices(self, mock_aiohttp_session):
+        client = FirewallaMSPClient(mock_aiohttp_session, "test.firewalla.net", "test_token")
+        mock_devices = [
+            {"id": "AA:BB:CC:DD:EE:FF", "name": "Test Phone", "online": True, "group": {"id": "28", "name": "Matt"}}
+        ]
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=mock_devices)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+        mock_aiohttp_session.request = MagicMock(return_value=mock_response)
+        result = await client.get_devices()
+        assert result == mock_devices
+
+    @pytest.mark.asyncio
+    async def test_get_users(self, mock_aiohttp_session):
+        client = FirewallaMSPClient(mock_aiohttp_session, "test.firewalla.net", "test_token")
+        mock_users = [
+            {"id": "box:29", "name": "Matt", "affiliatedTag": "28", "devices": ["AA:BB:CC:DD:EE:FF"]}
+        ]
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=mock_users)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+        mock_aiohttp_session.request = MagicMock(return_value=mock_response)
+        result = await client.get_users()
+        assert result == mock_users

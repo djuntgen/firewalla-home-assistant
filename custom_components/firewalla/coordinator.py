@@ -326,6 +326,14 @@ class FirewallaMSPClient:
         endpoint = API_ENDPOINTS["rule_detail"].format(rule_id=rule_id)
         return await self._make_request("GET", endpoint)
 
+    async def get_devices(self) -> list:
+        """Get all devices from MSP API."""
+        return await self._make_request("GET", API_ENDPOINTS["devices"])
+
+    async def get_users(self) -> list:
+        """Get all users from MSP API."""
+        return await self._make_request("GET", API_ENDPOINTS["users"])
+
     @property
     def is_authenticated(self) -> bool:
         """Return whether the client is authenticated."""

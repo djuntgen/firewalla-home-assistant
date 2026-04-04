@@ -25,6 +25,8 @@ API_ENDPOINTS = {
     "rule_pause": "/rules/{rule_id}/pause",
     "rule_resume": "/rules/{rule_id}/resume",
     "rule_detail": "/rules/{rule_id}",
+    "devices": "/devices",
+    "users": "/users",
     # V1 endpoints (legacy, for fallback)
     "legacy_rules": "/rule/list",
 }
