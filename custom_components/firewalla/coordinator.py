@@ -83,6 +83,69 @@ def _format_schedule(schedule: dict | None) -> str | None:
     return f"{day_str} at {time_str}"
 
 
+def _build_groups(
+    devices: list,
+    users: list,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """Build groups dict from device and user data, cross-referenced with rules."""
+    user_by_tag: dict[str, dict] = {}
+    for user in users:
+        tag = user.get("affiliatedTag")
+        if tag:
+            user_by_tag[tag] = user
+
+    groups: dict[str, dict[str, Any]] = {}
+    for device in devices:
+        group_info = device.get("group")
+        if not group_info or not isinstance(group_info, dict):
+            continue
+        gid = str(group_info.get("id", ""))
+        if not gid:
+            continue
+
+        if gid not in groups:
+            raw_name = group_info.get("name", gid)
+            user_data = user_by_tag.get(gid)
+            resolved_name = user_data["name"] if user_data else raw_name
+
+            groups[gid] = {
+                "name": resolved_name,
+                "is_user_group": user_data is not None,
+                "user_id": user_data["id"] if user_data else None,
+                "device_count": 0,
+                "devices": [],
+                "internet_block_rule_id": None,
+                "internet_blocked": False,
+                "rule_count": 0,
+                "download": user_data.get("download", 0) if user_data else 0,
+                "upload": user_data.get("upload", 0) if user_data else 0,
+            }
+
+        groups[gid]["device_count"] += 1
+        groups[gid]["devices"].append({
+            "name": device.get("name", "Unknown"),
+            "mac": device.get("id", ""),
+            "online": device.get("online", False),
+            "type": device.get("deviceType", ""),
+            "ip": device.get("ip", ""),
+        })
+
+    for rule_id, rule in rules.items():
+        scope_type = rule.get("scope_type", "")
+        scope_value = str(rule.get("scope_value", ""))
+        if scope_type != "group" or scope_value not in groups:
+            continue
+
+        groups[scope_value]["rule_count"] += 1
+
+        if rule.get("type") == "internet" and rule.get("action") == "block":
+            groups[scope_value]["internet_block_rule_id"] = rule_id
+            groups[scope_value]["internet_blocked"] = not rule.get("paused", False)
+
+    return groups
+
+
 class FirewallaMSPClient:
     """Client for Firewalla MSP API communication focused on rule management."""
 
@@ -394,6 +457,15 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             # Calculate rule statistics
             rule_stats = self._calculate_rule_statistics(rules_data)
 
+            # Fetch devices and users for group data
+            devices_response = await self.api.get_devices()
+            devices_list = devices_response if isinstance(devices_response, list) else []
+
+            users_response = await self.api.get_users()
+            users_list = users_response if isinstance(users_response, list) else []
+
+            groups_data = _build_groups(devices_list, users_list, rules_data)
+
             processed_data = {
                 "rules": rules_data,
                 "rule_count": rule_stats,
@@ -404,6 +476,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     "name": f"Firewalla Box {self.box_gid[:8]}",
                     "online": True,  # Assume online if we can fetch data
                 },
+                "groups": groups_data,
             }
 
             # Update previous rules for next comparison

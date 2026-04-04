@@ -289,6 +289,8 @@ class TestFirewallaDataUpdateCoordinator:
         # Mock the API client methods
         coordinator.api.authenticate = AsyncMock(return_value=True)
         coordinator.api.get_rules = AsyncMock(return_value=mock_api_responses["rules"])
+        coordinator.api.get_devices = AsyncMock(return_value=[])
+        coordinator.api.get_users = AsyncMock(return_value=[])
         coordinator.api._authenticated = True
 
         result = await coordinator._async_update_data()
@@ -296,6 +298,7 @@ class TestFirewallaDataUpdateCoordinator:
         assert "rules" in result
         assert "rule_count" in result
         assert "box_info" in result
+        assert "groups" in result
         assert len(result["rules"]) == 2
         assert result["rule_count"]["total"] == 2
         assert result["rule_count"]["active"] == 1
@@ -310,6 +313,8 @@ class TestFirewallaDataUpdateCoordinator:
         coordinator.api._authenticated = False
         coordinator.api.authenticate = AsyncMock(return_value=True)
         coordinator.api.get_rules = AsyncMock(return_value=mock_api_responses["rules"])
+        coordinator.api.get_devices = AsyncMock(return_value=[])
+        coordinator.api.get_users = AsyncMock(return_value=[])
 
         result = await coordinator._async_update_data()
 
@@ -642,3 +647,80 @@ class TestFirewallaMSPClientDevicesUsers:
         mock_aiohttp_session.request = MagicMock(return_value=mock_response)
         result = await client.get_users()
         assert result == mock_users
+
+
+class TestGroupProcessing:
+    """Tests for group and user data processing."""
+
+    def test_build_groups_from_devices(self):
+        from custom_components.firewalla.coordinator import _build_groups
+
+        devices = [
+            {"id": "AA:BB:CC:DD:EE:01", "name": "Phone", "online": True, "deviceType": "phone",
+             "group": {"id": "28", "name": "Matt"}},
+            {"id": "AA:BB:CC:DD:EE:02", "name": "Tablet", "online": False, "deviceType": "tablet",
+             "group": {"id": "28", "name": "Matt"}},
+            {"id": "AA:BB:CC:DD:EE:03", "name": "Camera", "online": True, "deviceType": "camera",
+             "group": {"id": "25", "name": "Cameras"}},
+            {"id": "AA:BB:CC:DD:EE:04", "name": "Laptop", "online": True, "deviceType": "desktop"},
+        ]
+        users = [
+            {"id": "box:29", "name": "Matt", "affiliatedTag": "28",
+             "devices": ["AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"],
+             "download": 1000, "upload": 500},
+        ]
+        rules = {
+            "rule1": {"id": "rule1", "action": "block", "type": "internet", "scope_type": "group", "scope_value": "28", "paused": False},
+            "rule2": {"id": "rule2", "action": "block", "type": "category", "scope_type": "group", "scope_value": "28", "paused": False},
+        }
+
+        groups = _build_groups(devices, users, rules)
+
+        assert "28" in groups
+        assert groups["28"]["name"] == "Matt"
+        assert groups["28"]["is_user_group"] is True
+        assert groups["28"]["user_id"] == "box:29"
+        assert groups["28"]["device_count"] == 2
+        assert groups["28"]["internet_block_rule_id"] == "rule1"
+        assert groups["28"]["internet_blocked"] is True
+        assert groups["28"]["download"] == 1000
+
+        assert "25" in groups
+        assert groups["25"]["name"] == "Cameras"
+        assert groups["25"]["is_user_group"] is False
+        assert groups["25"]["internet_block_rule_id"] is None
+
+    def test_build_groups_resolves_uuid_names(self):
+        from custom_components.firewalla.coordinator import _build_groups
+
+        devices = [
+            {"id": "AA:BB:CC:DD:EE:01", "name": "Harvey Tablet", "online": True, "deviceType": "tablet",
+             "group": {"id": "32", "name": "BFB913AE-49E7-4465-961D-6FB1496147DF"}},
+        ]
+        users = [
+            {"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": ["AA:BB:CC:DD:EE:01"],
+             "download": 0, "upload": 0},
+        ]
+
+        groups = _build_groups(devices, users, {})
+        assert groups["32"]["name"] == "Harvey"
+
+    def test_build_groups_internet_paused(self):
+        from custom_components.firewalla.coordinator import _build_groups
+
+        devices = [
+            {"id": "AA:BB:CC:DD:EE:01", "name": "Phone", "online": True, "deviceType": "phone",
+             "group": {"id": "28", "name": "Matt"}},
+        ]
+        rules = {
+            "rule1": {"id": "rule1", "action": "block", "type": "internet", "scope_type": "group", "scope_value": "28", "paused": True},
+        }
+
+        groups = _build_groups(devices, [], rules)
+        assert groups["28"]["internet_blocked"] is False
+
+    def test_build_groups_no_devices(self):
+        from custom_components.firewalla.coordinator import _build_groups
+
+        groups = _build_groups([], [], {})
+        assert groups == {}
