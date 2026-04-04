@@ -1,0 +1,78 @@
+# Firewalla Parental Control Dashboard
+#
+# Installation:
+# 1. Install the "auto-entities" custom card from HACS
+#    (HACS > Frontend > Search "auto-entities" > Install)
+# 2. Go to Settings > Dashboards > Add Dashboard
+# 3. Choose "New dashboard from scratch", name it "Firewalla"
+# 4. Open the dashboard, click the 3 dots menu > Edit Dashboard
+# 5. Click the 3 dots menu again > Raw Configuration Editor
+# 6. Paste this entire file and save
+#
+# This dashboard auto-discovers all Firewalla user groups and their
+# entities. When you add a new child on Firewalla, their card appears
+# automatically after the next coordinator poll (~30 seconds).
+
+title: Firewalla Parental Controls
+views:
+  - title: Kids
+    path: kids
+    icon: mdi:shield-account
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        cards:
+          # ----------------------------------------------------------
+          # Activity status — one row per child, auto-discovered
+          # ----------------------------------------------------------
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Activity
+            filter:
+              include:
+                - entity_id: "binary_sensor.firewalla_user_*_active"
+                  options:
+                    secondary_info: last-changed
+            sort:
+              method: friendly_name
+
+          # ----------------------------------------------------------
+          # Internet access toggles — one row per child
+          # ----------------------------------------------------------
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Internet Access
+            filter:
+              include:
+                - entity_id: "switch.firewalla_group_*_internet"
+            sort:
+              method: friendly_name
+
+          # ----------------------------------------------------------
+          # Time limits — remaining minutes per app per child
+          # ----------------------------------------------------------
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Time Limits
+            filter:
+              include:
+                - entity_id: "sensor.firewalla_timelimit_*"
+            sort:
+              method: friendly_name
+
+          # ----------------------------------------------------------
+          # Content block rules — category/app blocks per child
+          # ----------------------------------------------------------
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Content Blocks
+            filter:
+              include:
+                - entity_id: "switch.firewalla_group_*_rule_*"
+            sort:
+              method: friendly_name
