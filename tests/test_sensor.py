@@ -371,3 +371,85 @@ class TestFirewallaGroupSensor:
         assert attrs["internet_blocked"] is True
         assert attrs["rule_count"] == 6
         assert attrs["download"] == 1000
+
+
+class TestFirewallaTimeLimitSensor:
+    def _make_coordinator(self, time_limits=None, groups=None):
+        coordinator = MagicMock(spec=FirewallaDataUpdateCoordinator)
+        coordinator.data = {
+            "time_limits": time_limits or {},
+            "groups": groups or {},
+            "box_info": {"gid": "test-box", "name": "Test Box", "model": "gold"},
+        }
+        coordinator.last_update_success = True
+        coordinator.box_gid = "test-box"
+        return coordinator
+
+    def test_init(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {
+            "r1": {"app": "roblox", "quota": 60, "used": 61, "remaining": 0, "reached": True,
+                   "paused": False, "schedule_display": "daily at 00:00 all day", "hit_count": 8789}}}}
+        groups = {"32": {"name": "Harvey", "is_user_group": True, "user_id": "box:33",
+                         "device_count": 5, "devices": [], "internet_block_rule_id": None,
+                         "internet_blocked": False, "rule_count": 0, "download": 0, "upload": 0, "group_rules": {}}}
+        coordinator = self._make_coordinator(time_limits=time_limits, groups=groups)
+        sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
+        assert sensor._attr_unique_id == "firewalla_timelimit_33_r1"
+        assert "Harvey" in sensor._attr_name
+        assert "Roblox" in sensor._attr_name
+        assert sensor._attr_has_entity_name is True
+
+    def test_native_value_minutes_used(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {
+            "r1": {"app": "roblox", "quota": 60, "used": 45, "remaining": 15, "reached": False,
+                   "paused": False, "schedule_display": None, "hit_count": 0}}}}
+        coordinator = self._make_coordinator(time_limits=time_limits)
+        sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
+        assert sensor.native_value == 45
+
+    def test_native_value_missing(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        coordinator = self._make_coordinator(time_limits={})
+        sensor = FirewallaTimeLimitSensor(coordinator, "99", "r1")
+        assert sensor.native_value == 0
+
+    def test_available_true(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {
+            "r1": {"app": "roblox", "quota": 60, "used": 45, "remaining": 15, "reached": False,
+                   "paused": False, "schedule_display": None, "hit_count": 0}}}}
+        coordinator = self._make_coordinator(time_limits=time_limits)
+        sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
+        assert sensor.available is True
+
+    def test_unavailable_when_removed(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {}}}
+        coordinator = self._make_coordinator(time_limits=time_limits)
+        sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
+        assert sensor.available is False
+
+    def test_extra_state_attributes(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        time_limits = {"33": {"user_name": "Harvey", "user_id": "box:33", "affiliated_group": "32", "limits": {
+            "r1": {"app": "roblox", "quota": 60, "used": 61, "remaining": 0, "reached": True,
+                   "paused": False, "schedule_display": "daily at 00:00 all day", "hit_count": 8789}}}}
+        coordinator = self._make_coordinator(time_limits=time_limits)
+        sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
+        attrs = sensor.extra_state_attributes
+        assert attrs["quota_minutes"] == 60
+        assert attrs["remaining_minutes"] == 0
+        assert attrs["reached"] is True
+        assert attrs["schedule"] == "daily at 00:00 all day"
+        assert attrs["hit_count"] == 8789
+        assert attrs["user_name"] == "Harvey"
+
+    def test_attributes_when_missing(self):
+        from custom_components.firewalla.sensor import FirewallaTimeLimitSensor
+        coordinator = self._make_coordinator(time_limits={})
+        sensor = FirewallaTimeLimitSensor(coordinator, "99", "r1")
+        attrs = sensor.extra_state_attributes
+        assert attrs["user_scope_id"] == "99"
+        assert attrs["rule_id"] == "r1"

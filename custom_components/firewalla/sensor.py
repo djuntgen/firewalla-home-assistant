@@ -70,6 +70,7 @@ async def async_setup_entry(
             async_add_entities([])
 
         known_group_ids: set[str] = set()
+        known_time_limit_keys: set[tuple[str, str]] = set()
 
         @callback
         def _async_update_group_sensors():
@@ -91,6 +92,28 @@ async def async_setup_entry(
                     if entity_id:
                         ent_reg.async_remove(entity_id)
                 known_group_ids.difference_update(removed_groups)
+
+            # --- Time limit sensors ---
+            current_tl_keys: set[tuple[str, str]] = set()
+            if coordinator.data and "time_limits" in coordinator.data:
+                for uid, udata in coordinator.data["time_limits"].items():
+                    for rid in udata.get("limits", {}):
+                        current_tl_keys.add((uid, rid))
+
+            new_tl = current_tl_keys - known_time_limit_keys
+            if new_tl:
+                new_sensors = [FirewallaTimeLimitSensor(coordinator, uid, rid) for uid, rid in new_tl]
+                async_add_entities(new_sensors)
+                known_time_limit_keys.update(new_tl)
+
+            removed_tl = known_time_limit_keys - current_tl_keys
+            if removed_tl:
+                ent_reg = er.async_get(hass)
+                for uid, rid in removed_tl:
+                    entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"firewalla_timelimit_{uid}_{rid}")
+                    if entity_id:
+                        ent_reg.async_remove(entity_id)
+                known_time_limit_keys.difference_update(removed_tl)
 
         _async_update_group_sensors()
         config_entry.async_on_unload(coordinator.async_add_listener(_async_update_group_sensors))
@@ -326,4 +349,83 @@ class FirewallaGroupSensor(CoordinatorEntity, SensorEntity):
             "rule_count": group.get("rule_count", 0),
             "download": group.get("download", 0),
             "upload": group.get("upload", 0),
+        }
+
+
+class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
+    """Sensor showing app time usage for a user's time limit rule."""
+
+    _attr_has_entity_name = True
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "min"
+    _unrecorded_attributes = frozenset({"user_scope_id", "rule_id", "user_id", "schedule"})
+
+    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, user_scope_id: str, rule_id: str) -> None:
+        super().__init__(coordinator)
+        self._user_scope_id = user_scope_id
+        self._rule_id = rule_id
+        user_data = self._get_user_data()
+        limit_data = self._get_limit_data()
+        user_name = user_data["user_name"] if user_data else f"User {user_scope_id}"
+        app_name = (limit_data["app"] if limit_data else "unknown").title()
+        self._attr_unique_id = f"firewalla_timelimit_{user_scope_id}_{rule_id}"
+        self._attr_name = f"{user_name} {app_name} Time"
+        self._attr_icon = "mdi:timer-outline"
+        # Attach to the user's affiliated group device
+        affiliated_group = user_data.get("affiliated_group", "") if user_data else ""
+        group_data = None
+        if affiliated_group and coordinator.data and "groups" in coordinator.data:
+            group_data = coordinator.data["groups"].get(affiliated_group)
+        if group_data:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"group_{affiliated_group}")},
+                name=f"Firewalla Group: {group_data['name']}",
+                manufacturer=DEVICE_MANUFACTURER,
+                model="Group",
+                via_device=(DOMAIN, coordinator.box_gid),
+            )
+        else:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, coordinator.box_gid)},
+                name=f"Firewalla Box {coordinator.box_gid[:8]}",
+                manufacturer=DEVICE_MANUFACTURER,
+            )
+
+    def _get_user_data(self) -> dict[str, Any] | None:
+        if not self.coordinator.data or "time_limits" not in self.coordinator.data:
+            return None
+        return self.coordinator.data["time_limits"].get(self._user_scope_id)
+
+    def _get_limit_data(self) -> dict[str, Any] | None:
+        user_data = self._get_user_data()
+        if not user_data:
+            return None
+        return user_data.get("limits", {}).get(self._rule_id)
+
+    @property
+    def native_value(self) -> int:
+        limit = self._get_limit_data()
+        return limit.get("used", 0) if limit else 0
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._get_limit_data() is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        limit = self._get_limit_data()
+        user_data = self._get_user_data()
+        if not limit:
+            return {"user_scope_id": self._user_scope_id, "rule_id": self._rule_id}
+        return {
+            "user_scope_id": self._user_scope_id,
+            "rule_id": self._rule_id,
+            "user_name": user_data["user_name"] if user_data else "",
+            "app": limit.get("app", ""),
+            "quota_minutes": limit.get("quota", 0),
+            "remaining_minutes": limit.get("remaining", 0),
+            "reached": limit.get("reached", False),
+            "paused": limit.get("paused", False),
+            "schedule": limit.get("schedule_display"),
+            "hit_count": limit.get("hit_count", 0),
         }
