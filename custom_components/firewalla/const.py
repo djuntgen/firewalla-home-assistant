@@ -127,7 +127,7 @@ TARGET_PREFIXES = {
 }
 
 # Platforms
-PLATFORMS = ["switch", "sensor"]
+PLATFORMS = ["switch", "sensor", "binary_sensor"]
 
 # Device information constants
 DEVICE_MANUFACTURER = "Firewalla"

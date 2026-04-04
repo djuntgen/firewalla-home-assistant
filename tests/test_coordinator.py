@@ -799,3 +799,29 @@ class TestGroupRulesAndTimeLimits:
                    "schedule_display": None, "hit_count": 0},
         }
         assert _build_time_limits(users, rules) == {}
+
+    def test_build_groups_activity_detection(self):
+        from custom_components.firewalla.coordinator import _build_groups
+        devices = [
+            {"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone",
+             "totalDownload": 10000, "group": {"id": "28", "name": "Matt"}},
+        ]
+        # First poll — no previous data, should not be active
+        groups = _build_groups(devices, [], {}, previous_downloads=None)
+        assert groups["28"]["active"] is False  # No delta on first poll
+        assert groups["28"]["total_download"] == 10000
+
+        # Second poll — download increased by 5000 bytes
+        devices[0]["totalDownload"] = 15000
+        groups2 = _build_groups(devices, [], {}, previous_downloads={"28": 10000})
+        assert groups2["28"]["active"] is True
+        assert groups2["28"]["download_delta"] == 5000
+
+    def test_build_groups_activity_below_threshold(self):
+        from custom_components.firewalla.coordinator import _build_groups
+        devices = [
+            {"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone",
+             "totalDownload": 10500, "group": {"id": "28", "name": "Matt"}},
+        ]
+        groups = _build_groups(devices, [], {}, previous_downloads={"28": 10000})
+        assert groups["28"]["active"] is False  # 500 bytes < 1024 threshold

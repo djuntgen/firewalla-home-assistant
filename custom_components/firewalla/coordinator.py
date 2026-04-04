@@ -87,6 +87,7 @@ def _build_groups(
     devices: list,
     users: list,
     rules: dict[str, Any],
+    previous_downloads: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Build groups dict from device and user data, cross-referenced with rules."""
     user_by_tag: dict[str, dict] = {}
@@ -130,7 +131,18 @@ def _build_groups(
             "online": device.get("online", False),
             "type": device.get("deviceType", ""),
             "ip": device.get("ip", ""),
+            "total_download": device.get("totalDownload", 0),
         })
+
+    # Compute download totals and activity per group
+    if previous_downloads is None:
+        previous_downloads = {}
+    for gid, group in groups.items():
+        total_dl = sum(d.get("total_download", 0) for d in group["devices"])
+        prev_dl = previous_downloads.get(gid, total_dl)  # Default to current on first poll (no delta)
+        group["total_download"] = total_dl
+        group["download_delta"] = total_dl - prev_dl
+        group["active"] = (total_dl - prev_dl) > 1024  # >1KB = active data flow
 
     for rule_id, rule in rules.items():
         scope_type = rule.get("scope_type", "")
@@ -478,6 +490,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         self.api = FirewallaMSPClient(session, msp_domain, access_token)
         self.box_gid = box_gid
         self._previous_rules = {}
+        self._previous_group_downloads: dict[str, int] = {}
         self.include_filters = include_filters or []
         self.exclude_filters = exclude_filters or []
 
@@ -522,7 +535,13 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             users_response = await self.api.get_users()
             users_list = users_response if isinstance(users_response, list) else []
 
-            groups_data = _build_groups(devices_list, users_list, rules_data)
+            groups_data = _build_groups(devices_list, users_list, rules_data, self._previous_group_downloads)
+
+            # Update previous downloads for next delta computation
+            self._previous_group_downloads = {
+                gid: gdata["total_download"] for gid, gdata in groups_data.items()
+            }
+
             time_limits_data = _build_time_limits(users_list, rules_data)
 
             processed_data = {

@@ -69,30 +69,10 @@ async def async_setup_entry(
             _LOGGER.warning("No valid rule statistics sensor entities could be created")
             async_add_entities([])
 
-        known_group_ids: set[str] = set()
         known_time_limit_keys: set[tuple[str, str]] = set()
 
         @callback
-        def _async_update_group_sensors():
-            if not coordinator.data or "groups" not in coordinator.data:
-                return
-            current_groups = set(coordinator.data["groups"].keys())
-
-            new_groups = current_groups - known_group_ids
-            if new_groups:
-                new_sensors = [FirewallaGroupSensor(coordinator, gid) for gid in new_groups]
-                async_add_entities(new_sensors)
-                known_group_ids.update(new_groups)
-
-            removed_groups = known_group_ids - current_groups
-            if removed_groups:
-                ent_reg = er.async_get(hass)
-                for gid in removed_groups:
-                    entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"firewalla_group_{gid}")
-                    if entity_id:
-                        ent_reg.async_remove(entity_id)
-                known_group_ids.difference_update(removed_groups)
-
+        def _async_update_dynamic_sensors():
             # --- Time limit sensors ---
             current_tl_keys: set[tuple[str, str]] = set()
             if coordinator.data and "time_limits" in coordinator.data:
@@ -115,8 +95,8 @@ async def async_setup_entry(
                         ent_reg.async_remove(entity_id)
                 known_time_limit_keys.difference_update(removed_tl)
 
-        _async_update_group_sensors()
-        config_entry.async_on_unload(coordinator.async_add_listener(_async_update_group_sensors))
+        _async_update_dynamic_sensors()
+        config_entry.async_on_unload(coordinator.async_add_listener(_async_update_dynamic_sensors))
 
     except KeyError as err:
         _LOGGER.error(
@@ -290,66 +270,6 @@ class FirewallaRulesSensor(CoordinatorEntity, SensorEntity):
         _LOGGER.debug(
             "Rules summary sensor entity being removed from hass: %s", self.name
         )
-
-
-class FirewallaGroupSensor(CoordinatorEntity, SensorEntity):
-    """Sensor showing device count and info for a Firewalla group."""
-
-    _attr_has_entity_name = True
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "devices"
-    _unrecorded_attributes = frozenset({
-        "group_id", "is_user_group", "user_id", "device_names",
-    })
-
-    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, group_id: str) -> None:
-        super().__init__(coordinator)
-        self._group_id = group_id
-        group = self._get_group_data()
-        group_name = group["name"] if group else group_id
-        self._attr_unique_id = f"firewalla_group_{group_id}"
-        self._attr_name = f"{group_name} Devices"
-        self._attr_icon = "mdi:account-group"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"group_{group_id}")},
-            name=f"Firewalla Group: {group_name}",
-            manufacturer=DEVICE_MANUFACTURER,
-            model="Group",
-            via_device=(DOMAIN, coordinator.box_gid),
-        )
-
-    def _get_group_data(self) -> dict[str, Any] | None:
-        if not self.coordinator.data or "groups" not in self.coordinator.data:
-            return None
-        return self.coordinator.data["groups"].get(self._group_id)
-
-    @property
-    def native_value(self) -> int:
-        group = self._get_group_data()
-        return group.get("device_count", 0) if group else 0
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success and self._get_group_data() is not None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        group = self._get_group_data()
-        if not group:
-            return {"group_id": self._group_id}
-        devices = group.get("devices", [])
-        return {
-            "group_id": self._group_id,
-            "group_name": group["name"],
-            "is_user_group": group.get("is_user_group", False),
-            "user_id": group.get("user_id"),
-            "online_devices": sum(1 for d in devices if d.get("online")),
-            "device_names": [d["name"] for d in devices],
-            "internet_blocked": group.get("internet_blocked", False),
-            "rule_count": group.get("rule_count", 0),
-            "download": group.get("download", 0),
-            "upload": group.get("upload", 0),
-        }
 
 
 class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
