@@ -516,6 +516,15 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         self.include_filters = include_filters or []
         self.exclude_filters = exclude_filters or []
 
+        # Caching: users data rarely changes, refresh every 10 minutes
+        self._cached_users: list = []
+        self._users_last_fetched: float = 0
+        self._USERS_CACHE_TTL: float = 600  # 10 minutes
+
+        # Devices polling: fetch every other cycle (60s) instead of every 30s
+        self._cached_devices: list = []
+        self._poll_count: int = 0
+
         super().__init__(
             hass,
             _LOGGER,
@@ -550,12 +559,22 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             # Calculate rule statistics
             rule_stats = self._calculate_rule_statistics(rules_data)
 
-            # Fetch devices and users for group data
-            devices_response = await self.api.get_devices()
-            devices_list = devices_response if isinstance(devices_response, list) else []
+            # Fetch devices every other poll (60s) — activity detection
+            # uses 5-min cooldown so 60s resolution is sufficient.
+            self._poll_count += 1
+            if self._poll_count % 2 == 1 or not self._cached_devices:
+                devices_response = await self.api.get_devices()
+                self._cached_devices = devices_response if isinstance(devices_response, list) else []
+            devices_list = self._cached_devices
 
-            users_response = await self.api.get_users()
-            users_list = users_response if isinstance(users_response, list) else []
+            # Cache users for 10 minutes — names/affiliations rarely change.
+            import time as _time
+            now = _time.time()
+            if (now - self._users_last_fetched) > self._USERS_CACHE_TTL or not self._cached_users:
+                users_response = await self.api.get_users()
+                self._cached_users = users_response if isinstance(users_response, list) else []
+                self._users_last_fetched = now
+            users_list = self._cached_users
 
             groups_data = _build_groups(
                 devices_list, users_list, rules_data,
@@ -957,8 +976,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
             if result:
                 _LOGGER.info("Successfully paused rule: %s", rule_id)
-                # Trigger a data refresh to get the updated rule status
-                await self.async_request_refresh()
+                # No refresh needed — switch entities do optimistic updates,
+                # and the next regular 30s poll confirms the state.
                 return True
             else:
                 _LOGGER.error("Failed to pause rule %s: Invalid API response", rule_id)
@@ -980,8 +999,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
             if result:
                 _LOGGER.info("Successfully resumed rule: %s", rule_id)
-                # Trigger a data refresh to get the updated rule status
-                await self.async_request_refresh()
+                # No refresh needed — switch entities do optimistic updates,
+                # and the next regular 30s poll confirms the state.
                 return True
             else:
                 _LOGGER.error("Failed to resume rule %s: Invalid API response", rule_id)

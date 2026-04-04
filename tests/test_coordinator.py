@@ -436,15 +436,13 @@ class TestFirewallaDataUpdateCoordinator:
 
     @pytest.mark.asyncio
     async def test_async_pause_rule_success(self, coordinator):
-        """Test successful rule pausing."""
+        """Test successful rule pausing (no refresh — optimistic updates handle UI)."""
         coordinator.api.pause_rule = AsyncMock(return_value={"success": True})
-        coordinator.async_request_refresh = AsyncMock()
 
         result = await coordinator.async_pause_rule("rule-123")
 
         assert result is True
         coordinator.api.pause_rule.assert_called_once_with("rule-123")
-        coordinator.async_request_refresh.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_pause_rule_failure(self, coordinator):
@@ -457,15 +455,13 @@ class TestFirewallaDataUpdateCoordinator:
 
     @pytest.mark.asyncio
     async def test_async_resume_rule_success(self, coordinator):
-        """Test successful rule resuming."""
+        """Test successful rule resuming (no refresh — optimistic updates handle UI)."""
         coordinator.api.resume_rule = AsyncMock(return_value={"success": True})
-        coordinator.async_request_refresh = AsyncMock()
 
         result = await coordinator.async_resume_rule("rule-123")
 
         assert result is True
         coordinator.api.resume_rule.assert_called_once_with("rule-123")
-        coordinator.async_request_refresh.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_async_get_rules_cached(self, coordinator):
@@ -811,17 +807,19 @@ class TestGroupRulesAndTimeLimits:
         assert groups["28"]["active"] is False  # No delta on first poll
         assert groups["28"]["total_download"] == 10000
 
-        # Second poll — download increased by 5000 bytes
-        devices[0]["totalDownload"] = 15000
-        groups2 = _build_groups(devices, [], {}, previous_downloads={"28": 10000})
+        # Second poll — download increased by 20000 bytes (above 10KB threshold)
+        devices[0]["totalDownload"] = 30000
+        last_active = {}
+        groups2 = _build_groups(devices, [], {}, previous_downloads={"28": 10000}, last_active_times=last_active)
         assert groups2["28"]["active"] is True
-        assert groups2["28"]["download_delta"] == 5000
+        assert groups2["28"]["download_delta"] == 20000
+        assert "28" in last_active  # timestamp was recorded
 
     def test_build_groups_activity_below_threshold(self):
         from custom_components.firewalla.coordinator import _build_groups
         devices = [
             {"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone",
-             "totalDownload": 10500, "group": {"id": "28", "name": "Matt"}},
+             "totalDownload": 15000, "group": {"id": "28", "name": "Matt"}},
         ]
         groups = _build_groups(devices, [], {}, previous_downloads={"28": 10000})
-        assert groups["28"]["active"] is False  # 500 bytes < 1024 threshold
+        assert groups["28"]["active"] is False  # 5000 bytes < 10240 threshold
