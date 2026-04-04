@@ -724,3 +724,78 @@ class TestGroupProcessing:
 
         groups = _build_groups([], [], {})
         assert groups == {}
+
+
+class TestGroupRulesAndTimeLimits:
+    def test_build_groups_tracks_all_rules(self):
+        from custom_components.firewalla.coordinator import _build_groups
+        devices = [{"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone", "group": {"id": "28", "name": "Matt"}}]
+        rules = {
+            "r1": {"id": "r1", "action": "block", "type": "internet", "value": "", "scope_type": "group", "scope_value": "28", "paused": False, "status": "active", "hit_count": 100},
+            "r2": {"id": "r2", "action": "block", "type": "category", "value": "porn", "scope_type": "group", "scope_value": "28", "paused": False, "status": "active", "hit_count": 50},
+            "r3": {"id": "r3", "action": "block", "type": "app", "value": "tiktok", "scope_type": "group", "scope_value": "28", "paused": True, "status": "paused", "hit_count": 200},
+            "r4": {"id": "r4", "action": "block", "type": "category", "value": "vpn", "scope_type": "group", "scope_value": "28", "paused": False, "status": "active", "hit_count": 0},
+        }
+        groups = _build_groups(devices, [], rules)
+        g = groups["28"]
+        assert g["internet_block_rule_id"] == "r1"
+        assert len(g["group_rules"]) == 4
+        assert g["group_rules"]["r2"]["type"] == "category"
+        assert g["group_rules"]["r2"]["value"] == "porn"
+        assert g["group_rules"]["r2"]["paused"] is False
+        assert g["group_rules"]["r3"]["value"] == "tiktok"
+        assert g["group_rules"]["r3"]["paused"] is True
+        assert g["group_rules"]["r3"]["hit_count"] == 200
+
+    def test_build_time_limits(self):
+        from custom_components.firewalla.coordinator import _build_time_limits
+        users = [{"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
+        rules = {
+            "r1": {"id": "r1", "action": "timelimit", "type": "app", "value": "roblox",
+                   "scope_type": "user", "scope_value": "33", "paused": False,
+                   "time_quota_minutes": 60, "time_used_minutes": 61,
+                   "schedule_display": "daily at 00:00 all day", "hit_count": 8789},
+            "r2": {"id": "r2", "action": "timelimit", "type": "app", "value": "youtube",
+                   "scope_type": "user", "scope_value": "33", "paused": False,
+                   "time_quota_minutes": 60, "time_used_minutes": 62,
+                   "schedule_display": "Sun-Thu at 00:00 all day", "hit_count": 29328},
+        }
+        tl = _build_time_limits(users, rules)
+        assert "33" in tl
+        assert tl["33"]["user_name"] == "Harvey"
+        assert len(tl["33"]["limits"]) == 2
+        r = tl["33"]["limits"]["r1"]
+        assert r["app"] == "roblox"
+        assert r["quota"] == 60
+        assert r["used"] == 61
+        assert r["remaining"] == 0
+        assert r["reached"] is True
+
+    def test_build_time_limits_not_reached(self):
+        from custom_components.firewalla.coordinator import _build_time_limits
+        users = [{"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
+        rules = {
+            "r1": {"id": "r1", "action": "timelimit", "type": "app", "value": "facebook",
+                   "scope_type": "user", "scope_value": "33", "paused": False,
+                   "time_quota_minutes": 60, "time_used_minutes": 2,
+                   "schedule_display": "daily", "hit_count": 0},
+        }
+        tl = _build_time_limits(users, rules)
+        fb = tl["33"]["limits"]["r1"]
+        assert fb["remaining"] == 58
+        assert fb["reached"] is False
+
+    def test_build_time_limits_empty(self):
+        from custom_components.firewalla.coordinator import _build_time_limits
+        assert _build_time_limits([], {}) == {}
+
+    def test_build_time_limits_ignores_non_timelimit(self):
+        from custom_components.firewalla.coordinator import _build_time_limits
+        users = [{"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
+        rules = {
+            "r1": {"id": "r1", "action": "block", "type": "internet", "value": "",
+                   "scope_type": "user", "scope_value": "33", "paused": False,
+                   "time_quota_minutes": None, "time_used_minutes": None,
+                   "schedule_display": None, "hit_count": 0},
+        }
+        assert _build_time_limits(users, rules) == {}

@@ -118,6 +118,7 @@ def _build_groups(
                 "internet_block_rule_id": None,
                 "internet_blocked": False,
                 "rule_count": 0,
+                "group_rules": {},
                 "download": user_data.get("download", 0) if user_data else 0,
                 "upload": user_data.get("upload", 0) if user_data else 0,
             }
@@ -139,11 +140,68 @@ def _build_groups(
 
         groups[scope_value]["rule_count"] += 1
 
+        groups[scope_value]["group_rules"][rule_id] = {
+            "type": rule.get("type", ""),
+            "value": rule.get("value", ""),
+            "action": rule.get("action", ""),
+            "paused": rule.get("paused", False),
+            "status": rule.get("status", "active"),
+            "hit_count": rule.get("hit_count", 0),
+        }
+
         if rule.get("type") == "internet" and rule.get("action") == "block":
             groups[scope_value]["internet_block_rule_id"] = rule_id
             groups[scope_value]["internet_blocked"] = not rule.get("paused", False)
 
     return groups
+
+
+def _build_time_limits(
+    users: list,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """Build per-user time limit data from timelimit rules."""
+    user_by_scope: dict[str, dict] = {}
+    for user in users:
+        uid = user.get("id", "")
+        parts = uid.rsplit(":", 1)
+        if len(parts) == 2:
+            user_by_scope[parts[1]] = user
+
+    time_limits: dict[str, Any] = {}
+    for rule_id, rule in rules.items():
+        if rule.get("action") != "timelimit":
+            continue
+        scope_type = rule.get("scope_type", "")
+        scope_value = str(rule.get("scope_value", ""))
+        if scope_type != "user" or not scope_value:
+            continue
+
+        if scope_value not in time_limits:
+            user_data = user_by_scope.get(scope_value, {})
+            time_limits[scope_value] = {
+                "user_name": user_data.get("name", f"User {scope_value}"),
+                "user_id": user_data.get("id", ""),
+                "affiliated_group": user_data.get("affiliatedTag", ""),
+                "limits": {},
+            }
+
+        quota = rule.get("time_quota_minutes") or 0
+        used = rule.get("time_used_minutes") or 0
+        remaining = max(0, quota - used)
+
+        time_limits[scope_value]["limits"][rule_id] = {
+            "app": rule.get("value", "unknown"),
+            "quota": quota,
+            "used": used,
+            "remaining": remaining,
+            "reached": used >= quota if quota > 0 else False,
+            "paused": rule.get("paused", False),
+            "schedule_display": rule.get("schedule_display"),
+            "hit_count": rule.get("hit_count", 0),
+        }
+
+    return time_limits
 
 
 class FirewallaMSPClient:
@@ -465,6 +523,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             users_list = users_response if isinstance(users_response, list) else []
 
             groups_data = _build_groups(devices_list, users_list, rules_data)
+            time_limits_data = _build_time_limits(users_list, rules_data)
 
             processed_data = {
                 "rules": rules_data,
@@ -477,6 +536,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     "online": True,  # Assume online if we can fetch data
                 },
                 "groups": groups_data,
+                "time_limits": time_limits_data,
             }
 
             # Update previous rules for next comparison
