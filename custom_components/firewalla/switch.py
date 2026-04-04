@@ -225,10 +225,10 @@ async def async_setup_entry(
         current_group_rule_keys: set[tuple[str, str]] = set()
         if coordinator.data and "groups" in coordinator.data:
             for gid, gdata in coordinator.data["groups"].items():
-                internet_rule_id = gdata.get("internet_block_rule_id")
-                for rid in gdata.get("group_rules", {}):
-                    if rid != internet_rule_id:  # Skip internet — has its own switch
-                        current_group_rule_keys.add((gid, rid))
+                for rid, rinfo in gdata.get("group_rules", {}).items():
+                    if rinfo.get("type") == "internet":
+                        continue  # Internet rules have their own inverted switch
+                    current_group_rule_keys.add((gid, rid))
 
         new_group_rules = current_group_rule_keys - known_group_rule_keys
         if new_group_rules:
