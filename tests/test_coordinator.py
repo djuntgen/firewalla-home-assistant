@@ -9,6 +9,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from custom_components.firewalla.coordinator import (
     FirewallaMSPClient,
     FirewallaDataUpdateCoordinator,
+    _format_schedule,
 )
 from custom_components.firewalla.const import API_ENDPOINTS
 
@@ -33,6 +34,7 @@ def mock_api_responses():
                 "target_name": "John's Laptop",
                 "disabled": False,
                 "paused": False,
+                "status": "active",
                 "action": "block",
                 "description": "Block internet during study time",
                 "priority": 1000,
@@ -46,6 +48,7 @@ def mock_api_responses():
                 "target_name": "Gaming Category",
                 "disabled": False,
                 "paused": True,
+                "status": "paused",
                 "action": "block",
                 "description": "Block gaming websites",
                 "priority": 500,
@@ -122,7 +125,7 @@ class TestFirewallaMSPClient:
         """Test authentication with connection error."""
         # Mock connection error
         mock_aiohttp_session.request.side_effect = aiohttp.ClientConnectorError(
-            connection_key=None, os_error=None
+            connection_key=MagicMock(), os_error=OSError(111, "Connection refused")
         )
 
         result = await client.authenticate()
@@ -162,11 +165,10 @@ class TestFirewallaMSPClient:
         result = await client.get_rules("status:active")
 
         assert result == mock_api_responses["rules"]
-        # Verify query parameter was included in URL
+        # Verify query parameter was included in URL (url is a positional arg)
         call_args = mock_aiohttp_session.request.call_args
-        assert "query=status:active" in call_args[1][
-            "url"
-        ] or "query=status:active" in str(call_args)
+        url_arg = call_args[0][1]  # second positional arg
+        assert "query=status:active" in url_arg
 
     @pytest.mark.asyncio
     async def test_pause_rule_success(
@@ -287,7 +289,7 @@ class TestFirewallaDataUpdateCoordinator:
         # Mock the API client methods
         coordinator.api.authenticate = AsyncMock(return_value=True)
         coordinator.api.get_rules = AsyncMock(return_value=mock_api_responses["rules"])
-        coordinator.api.is_authenticated = True
+        coordinator.api._authenticated = True
 
         result = await coordinator._async_update_data()
 
@@ -305,7 +307,7 @@ class TestFirewallaDataUpdateCoordinator:
     ):
         """Test data update when authentication is required."""
         # Mock not authenticated initially
-        coordinator.api.is_authenticated = False
+        coordinator.api._authenticated = False
         coordinator.api.authenticate = AsyncMock(return_value=True)
         coordinator.api.get_rules = AsyncMock(return_value=mock_api_responses["rules"])
 
@@ -318,7 +320,7 @@ class TestFirewallaDataUpdateCoordinator:
     @pytest.mark.asyncio
     async def test_async_update_data_authentication_failed(self, coordinator):
         """Test data update when authentication fails."""
-        coordinator.api.is_authenticated = False
+        coordinator.api._authenticated = False
         coordinator.api.authenticate = AsyncMock(return_value=False)
 
         with pytest.raises(ConfigEntryAuthFailed):
@@ -327,7 +329,7 @@ class TestFirewallaDataUpdateCoordinator:
     @pytest.mark.asyncio
     async def test_async_update_data_api_error(self, coordinator):
         """Test data update with API error."""
-        coordinator.api.is_authenticated = True
+        coordinator.api._authenticated = True
         coordinator.api.get_rules = AsyncMock(
             side_effect=HomeAssistantError("API Error")
         )
@@ -479,3 +481,130 @@ class TestFirewallaDataUpdateCoordinator:
 
         coordinator.api.get_rules.assert_called_once_with("status:active")
         assert len(result) == 2
+
+    def test_process_rules_data_enriched_fields(self, coordinator):
+        """Test that processed rules include hit_count, last_hit, time quota/used, and schedule_display."""
+        rules_list = [
+            {
+                "id": "rule-enriched",
+                "type": "internet",
+                "target": "mac:aa:bb:cc:dd:ee:ff",
+                "disabled": False,
+                "paused": False,
+                "action": "block",
+                "description": "Enriched rule",
+                "hit": {"count": 42, "lastHitTs": 1700000000},
+                "timeUsage": {"quota": 120, "used": 45},
+                "schedule": {"cronTime": "0 22 * * 1,2,3,4,5", "duration": 3600},
+            }
+        ]
+
+        result = coordinator._process_rules_data(rules_list)
+
+        rule = result["rule-enriched"]
+        assert rule["hit_count"] == 42
+        assert rule["last_hit"] == 1700000000
+        assert rule["time_quota_minutes"] == 120
+        assert rule["time_used_minutes"] == 45
+        assert rule["schedule_display"] is not None
+        assert "22:00" in rule["schedule_display"]
+
+    def test_process_rules_data_enriched_fields_defaults(self, coordinator):
+        """Test enriched fields default values when source data is missing."""
+        rules_list = [
+            {
+                "id": "rule-minimal",
+                "type": "internet",
+                "disabled": False,
+                "paused": False,
+                "action": "block",
+            }
+        ]
+
+        result = coordinator._process_rules_data(rules_list)
+
+        rule = result["rule-minimal"]
+        assert rule["hit_count"] == 0
+        assert rule["last_hit"] is None
+        assert rule["time_quota_minutes"] is None
+        assert rule["time_used_minutes"] is None
+        assert rule["schedule_display"] is None
+
+
+class TestFormatSchedule:
+    """Test the _format_schedule helper function."""
+
+    def test_none_schedule(self):
+        """Test with None input."""
+        assert _format_schedule(None) is None
+
+    def test_empty_schedule(self):
+        """Test with empty dict input."""
+        assert _format_schedule({}) is None
+
+    def test_no_cron_time(self):
+        """Test with schedule missing cronTime."""
+        assert _format_schedule({"duration": 3600}) is None
+
+    def test_empty_cron_time(self):
+        """Test with empty cronTime string."""
+        assert _format_schedule({"cronTime": ""}) is None
+
+    def test_daily_midnight(self):
+        """Test daily at midnight cron pattern: 0 0 * * *."""
+        result = _format_schedule({"cronTime": "0 0 * * *"})
+        assert result == "daily at 00:00"
+
+    def test_weekdays_at_2200(self):
+        """Test weekdays at 22:00 cron pattern: 0 22 * * 1,2,3,4,5."""
+        result = _format_schedule({"cronTime": "0 22 * * 1,2,3,4,5", "duration": 3600})
+        assert "weekdays" in result
+        assert "22:00" in result
+        assert "1h" in result
+
+    def test_specific_days(self):
+        """Test specific days cron pattern: 0 0 * * 1,2,3,4."""
+        result = _format_schedule({"cronTime": "0 0 * * 1,2,3,4"})
+        assert "Mon" in result
+        assert "Tue" in result
+        assert "Wed" in result
+        assert "Thu" in result
+        assert "00:00" in result
+
+    def test_weekends(self):
+        """Test weekends cron pattern: 0 9 * * 0,6."""
+        result = _format_schedule({"cronTime": "0 9 * * 0,6"})
+        assert "weekends" in result
+        assert "09:00" in result
+
+    def test_all_seven_days_is_daily(self):
+        """Test all seven days shows as daily: 0 8 * * 0,1,2,3,4,5,6."""
+        result = _format_schedule({"cronTime": "0 8 * * 0,1,2,3,4,5,6"})
+        assert "daily" in result
+        assert "08:00" in result
+
+    def test_duration_hours_and_minutes(self):
+        """Test duration formatting with hours and minutes."""
+        result = _format_schedule({"cronTime": "0 10 * * *", "duration": 5400})
+        assert "1h 30m" in result
+
+    def test_duration_minutes_only(self):
+        """Test duration formatting with minutes only."""
+        result = _format_schedule({"cronTime": "0 10 * * *", "duration": 1800})
+        assert "30m" in result
+
+    def test_duration_all_day(self):
+        """Test duration formatting for all day (>= 24h)."""
+        result = _format_schedule({"cronTime": "0 0 * * *", "duration": 86400})
+        assert "all day" in result
+
+    def test_no_duration(self):
+        """Test schedule without duration."""
+        result = _format_schedule({"cronTime": "0 15 * * *"})
+        assert result == "daily at 15:00"
+        assert "for" not in result
+
+    def test_short_cron_returns_raw(self):
+        """Test that a cron string with fewer than 5 parts returns raw."""
+        result = _format_schedule({"cronTime": "0 0 *"})
+        assert result == "0 0 *"

@@ -195,7 +195,7 @@ async def async_setup_entry(
                 )
                 if entity_id:
                     ent_reg.async_remove(entity_id)
-            known_rule_ids -= removed_ids
+            known_rule_ids.difference_update(removed_ids)
 
     # Perform the initial sync, then listen for coordinator updates.
     _async_update_entities()

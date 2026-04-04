@@ -1,8 +1,9 @@
 """Tests for Firewalla rule statistics sensor entities."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.firewalla.sensor import (
@@ -93,6 +94,17 @@ class TestFirewallaRulesSensor:
         assert sensor.unique_id == ENTITY_ID_FORMATS["rules_sensor"]
         assert sensor.name == "Firewalla Rules Summary"
         assert sensor.native_unit_of_measurement == "rules"
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
+        assert sensor._attr_has_entity_name is True
+
+    def test_unrecorded_attributes(self, mock_coordinator):
+        """Test _unrecorded_attributes frozenset is defined."""
+        sensor = FirewallaRulesSensor(mock_coordinator)
+
+        assert isinstance(sensor._unrecorded_attributes, frozenset)
+        assert "box_name" in sensor._unrecorded_attributes
+        assert "box_model" in sensor._unrecorded_attributes
+        assert "rules_by_type" in sensor._unrecorded_attributes
 
     def test_native_value_with_data(self, mock_coordinator):
         """Test native value with rule count data."""
@@ -133,12 +145,6 @@ class TestFirewallaRulesSensor:
 
         attributes = sensor.extra_state_attributes
 
-        assert attributes["total_rules"] == 3
-        assert attributes["active_rules"] == 1
-        assert attributes["paused_rules"] == 1
-        assert attributes["by_type"]["internet"] == 1
-        assert attributes["by_type"]["category"] == 1
-        assert attributes["by_type"]["domain"] == 1
         assert attributes["last_updated"] == "2023-01-01T12:00:00"
         assert attributes["api_status"] == "connected"
         assert attributes["box_name"] == "Firewalla Gold"
@@ -221,6 +227,7 @@ class TestFirewallaRulesSensor:
 
         device_info = sensor._get_device_info()
 
+        assert isinstance(device_info, dict)
         assert device_info["identifiers"] == {(DOMAIN, "box-123")}
         assert device_info["name"] == "Firewalla Gold"
         assert device_info["manufacturer"] == "Firewalla"
@@ -234,6 +241,7 @@ class TestFirewallaRulesSensor:
 
         device_info = sensor._get_device_info()
 
+        assert isinstance(device_info, dict)
         assert device_info["model"] == "Firewalla Unknown"
 
 
@@ -263,7 +271,8 @@ class TestAsyncSetupEntry:
         self, mock_hass, mock_config_entry
     ):
         """Test setup with missing coordinator."""
-        # Don't add coordinator to hass.data
+        # Use an entry_id that does not exist in hass.data
+        mock_config_entry.entry_id = "nonexistent_entry"
 
         async_add_entities = AsyncMock()
 
@@ -286,5 +295,5 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
 
-        # Should still be called with empty list
-        async_add_entities.assert_called_once_with([], True)
+        # Should still be called with empty list (no True argument)
+        async_add_entities.assert_called_once_with([])

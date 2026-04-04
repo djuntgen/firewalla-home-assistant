@@ -32,6 +32,8 @@ def mock_config_entry():
         source="user",
         entry_id="test_entry_id",
         unique_id="test_box_gid_456",
+        options={},
+        discovery_keys={},
     )
 
 
@@ -114,16 +116,27 @@ def mock_coordinator_data(mock_box_info, mock_devices_data, mock_rules_data):
 
 @pytest.fixture
 def mock_aiohttp_session():
-    """Return a mock aiohttp session."""
-    session = AsyncMock(spec=aiohttp.ClientSession)
+    """Return a mock aiohttp session.
 
-    # Mock successful API responses
-    mock_response = AsyncMock()
+    The session.request() returns an async context manager whose __aenter__
+    yields a mock response.  Tests can override the response object via
+    session.request.return_value.__aenter__.return_value or set side_effect
+    on session.request to raise exceptions before entering the context.
+    """
+    session = MagicMock(spec=aiohttp.ClientSession)
+
+    # Default response inside the context manager
+    mock_response = MagicMock()
     mock_response.status = 200
-    mock_response.json = AsyncMock()
+    mock_response.json = AsyncMock(return_value={})
     mock_response.text = AsyncMock(return_value="")
 
-    session.request = AsyncMock(return_value=mock_response)
+    # Build an async context manager that yields mock_response
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=mock_response)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+
+    session.request = MagicMock(return_value=ctx)
     return session
 
 
@@ -132,6 +145,9 @@ def mock_hass():
     """Return a mock Home Assistant instance."""
     hass = MagicMock(spec=HomeAssistant)
     hass.data = {DOMAIN: {}}
+    # Ensure async methods are properly mocked as coroutines
+    hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
+    hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
     return hass
 
 
