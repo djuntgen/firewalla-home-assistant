@@ -88,6 +88,7 @@ def _build_groups(
     users: list,
     rules: dict[str, Any],
     previous_downloads: dict[str, int] | None = None,
+    last_active_times: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Build groups dict from device and user data, cross-referenced with rules."""
     user_by_tag: dict[str, dict] = {}
@@ -134,15 +135,35 @@ def _build_groups(
             "total_download": device.get("totalDownload", 0),
         })
 
-    # Compute download totals and activity per group
+    # Compute download totals and activity per group.
+    # Activity uses a 5-minute cooldown: once data flow is detected, the user
+    # stays "active" until 5 minutes pass with no significant traffic.
+    # This prevents flapping from background keep-alive packets.
+    import time
+
+    ACTIVITY_THRESHOLD = 10240  # 10KB per poll — filters background noise
+    ACTIVITY_COOLDOWN = 300  # 5 minutes of silence before marking inactive
+
+    now = time.time()
     if previous_downloads is None:
         previous_downloads = {}
+    if last_active_times is None:
+        last_active_times = {}
+
     for gid, group in groups.items():
         total_dl = sum(d.get("total_download", 0) for d in group["devices"])
-        prev_dl = previous_downloads.get(gid, total_dl)  # Default to current on first poll (no delta)
+        prev_dl = previous_downloads.get(gid, total_dl)
+        delta = total_dl - prev_dl
         group["total_download"] = total_dl
-        group["download_delta"] = total_dl - prev_dl
-        group["active"] = (total_dl - prev_dl) > 1024  # >1KB = active data flow
+        group["download_delta"] = delta
+
+        # If meaningful traffic detected, update last-active timestamp
+        if delta > ACTIVITY_THRESHOLD:
+            last_active_times[gid] = now
+
+        # Active if last meaningful traffic was within the cooldown window
+        last_active = last_active_times.get(gid, 0)
+        group["active"] = (now - last_active) < ACTIVITY_COOLDOWN
 
     for rule_id, rule in rules.items():
         scope_type = rule.get("scope_type", "")
@@ -491,6 +512,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         self.box_gid = box_gid
         self._previous_rules = {}
         self._previous_group_downloads: dict[str, int] = {}
+        self._last_active_times: dict[str, float] = {}
         self.include_filters = include_filters or []
         self.exclude_filters = exclude_filters or []
 
@@ -535,12 +557,16 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             users_response = await self.api.get_users()
             users_list = users_response if isinstance(users_response, list) else []
 
-            groups_data = _build_groups(devices_list, users_list, rules_data, self._previous_group_downloads)
+            groups_data = _build_groups(
+                devices_list, users_list, rules_data,
+                self._previous_group_downloads, self._last_active_times,
+            )
 
-            # Update previous downloads for next delta computation
+            # Update tracking state for next poll
             self._previous_group_downloads = {
                 gid: gdata["total_download"] for gid, gdata in groups_data.items()
             }
+            # _last_active_times is mutated in-place by _build_groups
 
             time_limits_data = _build_time_limits(users_list, rules_data)
 
