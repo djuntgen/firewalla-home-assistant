@@ -128,6 +128,7 @@ def _build_groups(
                 "upload": user_data.get("upload", 0) if user_data else 0,
             }
 
+        network_info = device.get("network", {})
         groups[gid]["device_count"] += 1
         groups[gid]["devices"].append({
             "name": device.get("name", "Unknown"),
@@ -136,6 +137,11 @@ def _build_groups(
             "type": device.get("deviceType", ""),
             "ip": device.get("ip", ""),
             "total_download": device.get("totalDownload", 0),
+            "total_upload": device.get("totalUpload", 0),
+            "mac_vendor": device.get("macVendor", ""),
+            "last_seen": device.get("lastSeen"),
+            "ip_reserved": device.get("ipReserved", False),
+            "network": network_info.get("name", "") if isinstance(network_info, dict) else "",
         })
 
     # Compute download totals and activity per group.
@@ -155,9 +161,11 @@ def _build_groups(
 
     for gid, group in groups.items():
         total_dl = sum(d.get("total_download", 0) for d in group["devices"])
+        total_ul = sum(d.get("total_upload", 0) for d in group["devices"])
         prev_dl = previous_downloads.get(gid, total_dl)
         delta = total_dl - prev_dl
         group["total_download"] = total_dl
+        group["total_upload"] = total_ul
         group["download_delta"] = delta
 
         # If meaningful traffic detected, update last-active timestamp

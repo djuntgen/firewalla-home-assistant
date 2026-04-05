@@ -70,6 +70,7 @@ async def async_setup_entry(
             async_add_entities([])
 
         known_time_limit_keys: set[tuple[str, str]] = set()
+        known_bandwidth_gids: set[str] = set()
 
         @callback
         def _async_update_dynamic_sensors():
@@ -94,6 +95,32 @@ async def async_setup_entry(
                     if entity_id:
                         ent_reg.async_remove(entity_id)
                 known_time_limit_keys.difference_update(removed_tl)
+
+            # --- Bandwidth sensors (per user group) ---
+            current_bw_gids: set[str] = set()
+            if coordinator.data and "groups" in coordinator.data:
+                for gid, gdata in coordinator.data["groups"].items():
+                    if gdata.get("is_user_group"):
+                        current_bw_gids.add(gid)
+
+            new_bw = current_bw_gids - known_bandwidth_gids
+            if new_bw:
+                bw_sensors = []
+                for gid in new_bw:
+                    bw_sensors.append(FirewallaBandwidthSensor(coordinator, gid, "download"))
+                    bw_sensors.append(FirewallaBandwidthSensor(coordinator, gid, "upload"))
+                async_add_entities(bw_sensors)
+                known_bandwidth_gids.update(new_bw)
+
+            removed_bw = known_bandwidth_gids - current_bw_gids
+            if removed_bw:
+                ent_reg = er.async_get(hass)
+                for gid in removed_bw:
+                    for direction in ("download", "upload"):
+                        entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"firewalla_group_{gid}_{direction}")
+                        if entity_id:
+                            ent_reg.async_remove(entity_id)
+                known_bandwidth_gids.difference_update(removed_bw)
 
         _async_update_dynamic_sensors()
         config_entry.async_on_unload(coordinator.async_add_listener(_async_update_dynamic_sensors))
@@ -358,4 +385,62 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
             "paused": limit.get("paused", False),
             "schedule": limit.get("schedule_display"),
             "hit_count": limit.get("hit_count", 0),
+        }
+
+
+class FirewallaBandwidthSensor(CoordinatorEntity, SensorEntity):
+    """Sensor showing 24h bandwidth usage per user group."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "GB"
+    _attr_suggested_display_precision = 2
+
+    def __init__(
+        self, coordinator: FirewallaDataUpdateCoordinator, group_id: str, direction: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._group_id = group_id
+        self._direction = direction  # "download" or "upload"
+        group = self._get_group_data()
+        group_name = group["name"] if group else group_id
+        self._attr_unique_id = f"firewalla_group_{group_id}_{direction}"
+        self._attr_name = direction.title()
+        self._attr_icon = "mdi:download" if direction == "download" else "mdi:upload"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"group_{group_id}")},
+            name=group_name,
+            manufacturer=DEVICE_MANUFACTURER,
+            model="Group",
+            via_device=(DOMAIN, coordinator.box_gid),
+        )
+
+    def _get_group_data(self) -> dict[str, Any] | None:
+        if not self.coordinator.data or "groups" not in self.coordinator.data:
+            return None
+        return self.coordinator.data["groups"].get(self._group_id)
+
+    @property
+    def native_value(self) -> float:
+        group = self._get_group_data()
+        if not group:
+            return 0
+        bytes_val = group.get(f"total_{self._direction}", 0)
+        return round(bytes_val / (1024 ** 3), 2)  # bytes to GB
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._get_group_data() is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        group = self._get_group_data()
+        if not group:
+            return {"group_id": self._group_id}
+        bytes_val = group.get(f"total_{self._direction}", 0)
+        return {
+            "group_id": self._group_id,
+            "bytes": bytes_val,
+            "mb": round(bytes_val / (1024 ** 2), 1),
         }
