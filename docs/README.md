@@ -5,22 +5,26 @@ A custom Home Assistant integration for managing Firewalla firewall rules, group
 ## Features
 
 - **Rule switches** — each Firewalla rule becomes an HA switch (toggle pause/resume)
-- **Group internet switches** — per-group "Internet Access" switch (ON = internet allowed, OFF = blocked), mirroring the Firewalla app's Controls panel
-- **Per-group rule switches** — category/app block rules per group (e.g., "Matt Block Porn", "Harvey Block TikTok")
-- **Time limit sensors** — per-user app time limits showing remaining minutes, with quota/used/remaining/reached
-- **User activity sensors** — binary sensors detecting active internet usage per user (with 5-minute cooldown to prevent flapping)
+- **Group internet switches** — per-group internet control, derived from `action` + `target.type` API fields
+- **Per-group rule switches** — category/app block rules per group, named from API data (`action` + `target.value`)
+- **Time limit sensors** — per-user app and internet time limits with remaining minutes, quota, used, usage percentage
+- **Per-kid bandwidth sensors** — 24h download/upload in GB per user group
+- **Per-device online sensors** — online/offline status for each device with IP, MAC vendor, network, last seen
+- **User activity sensors** — binary sensors detecting active internet usage per user (10 KB threshold, 5-minute cooldown)
 - **Rules summary sensor** — overview of total/active/paused rules with breakdown by type
-- **Dynamic entity lifecycle** — entities auto-add/remove when Firewalla rules or groups change, no reload needed
+- **Dynamic entity lifecycle** — entities auto-add/remove when Firewalla rules, groups, or devices change
 - **Optimistic state updates** — UI reflects toggles immediately, confirmed on next poll
-- **Configurable polling intervals** — tune API call frequency to balance freshness vs. rate limits
-- **Split-polling optimization** — time limit rules (which change frequently) are polled every 30s; full rules refresh happens at a configurable interval (default 3 min), reducing API bandwidth by ~85%
+- **Configurable polling intervals** — tune API call frequency via integration options
+- **Split-polling** — time limit rules polled every 30s; full rules at configurable interval (default 3 min)
+- **Reconfigure flow** — update MSP credentials without deleting the integration
+- **Dynamic naming** — all entity names derived from API data, no hardcoded strings
 
 ## Prerequisites
 
 - Firewalla device (Gold, Gold SE, Purple, Purple SE, Blue, Red)
 - Firewalla MSP account with API access enabled
 - Personal Access Token from MSP settings
-- Home Assistant 2024.1+
+- Home Assistant 2026.4+
 
 ## Installation
 
@@ -45,17 +49,19 @@ A custom Home Assistant integration for managing Firewalla firewall rules, group
 4. Enter your Personal Access Token
 5. Select your Firewalla box (auto-selected if you only have one)
 
-### Options (Settings > Integrations > Firewalla > Configure)
+### Updating Credentials
 
-After setup, configure these options:
+Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure** to update your MSP domain or access token without deleting the integration. Useful when tokens expire.
+
+### Options (Settings > Integrations > Firewalla > Configure)
 
 | Option | Default | Range | Description |
 |--------|---------|-------|-------------|
-| Include Filters | *(empty)* | — | Only show rules matching these filters (one per line, OR'd). Example: `status:active` |
-| Exclude Filters | *(empty)* | — | Hide rules matching these filters (one per line). Example: `-target.type:category` |
-| Full Rules Refresh | 180s | 30–900s | How often to fetch ALL rules. Between refreshes, only time limit rules are fetched (much smaller payload). |
-| Devices Refresh | 60s | 30–600s | How often to refresh device data (used for activity detection). |
-| Users Cache Duration | 600s | 60–3600s | How long to cache user/group name data (names rarely change). |
+| Include Filters | *(empty)* | — | Only show rules matching these filters (one per line, OR'd) |
+| Exclude Filters | *(empty)* | — | Hide rules matching these filters (one per line) |
+| Full Rules Refresh | 180s | 30-900s | How often to fetch ALL rules. Time limits are always fetched every 30s. |
+| Devices Refresh | 60s | 30-600s | How often to refresh device data for activity detection. |
+| Users Cache Duration | 600s | 60-3600s | How long to cache user/group name data. |
 
 #### Filter Syntax
 
@@ -67,143 +73,187 @@ action:block            # Only block rules
 target.type:app         # Only app rules
 target.type:category    # Only category rules
 target.type:internet    # Only internet rules
+scope.type:group        # Only group-scoped rules
 ```
 
 ## Entities
 
+All entity names are derived from API data. Users can override display names via **Settings > Entities > friendly_name**.
+
 ### Switches
 
-| Entity Pattern | Description | UX |
-|---------------|-------------|-----|
-| `switch.firewalla_*` | Per-rule switch | ON = rule active, OFF = rule paused |
-| `switch.firewalla_group_*_internet_access` | Group internet switch | **ON = internet allowed**, OFF = internet blocked (inverted from the underlying block rule) |
-| `switch.firewalla_group_*_block_*` | Group rule switch | ON = block active, OFF = block paused |
+| Entity | Name Source | Description |
+|--------|------------|-------------|
+| Per-rule switch | Rule description/target | ON = rule active, OFF = rule paused |
+| Group internet switch | `{action} {target.type}` | ON = internet allowed (inverted), OFF = blocked |
+| Group rule switch | `{action} {target.value}` | ON = block active, OFF = block paused |
 
 ### Sensors
 
-| Entity Pattern | Description | State |
-|---------------|-------------|-------|
-| `sensor.firewalla_rules_summary` | Rules overview | Total rule count |
-| `sensor.firewalla_timelimit_*` | Per-user app time limit | Minutes remaining |
+| Entity | Name Source | State | Key Attributes |
+|--------|------------|-------|----------------|
+| Rules summary | Static | Total rule count | active, paused, by_type |
+| Time limit | `{target.value}` (e.g., "Internet", "Youtube") | Minutes remaining | quota_minutes, used_minutes, usage_percent, reached |
+| Bandwidth (download) | "Download" | GB (24h) | bytes, mb |
+| Bandwidth (upload) | "Upload" | GB (24h) | bytes, mb |
 
 ### Binary Sensors
 
-| Entity Pattern | Description | State |
-|---------------|-------------|-------|
-| `binary_sensor.firewalla_user_*_active` | User activity detection | ON = actively using internet |
+| Entity | Name Source | State | Key Attributes |
+|--------|------------|-------|----------------|
+| User activity | "Active" | ON = traffic flowing | online_devices, active_devices, download_delta_bytes |
+| Device online | Device name from API | ON = online | ip, mac_vendor, network, last_seen, download_24h_mb, upload_24h_mb |
+
+### Device Grouping
+
+Each Firewalla user group becomes an HA **device** named after the user (e.g., "Matt", "Harvey"). All entities for that user are grouped under their device. The device name comes directly from the Firewalla API — no "Firewalla Group:" prefix.
 
 ### Entity Attributes
 
-**Rule switches** expose:
-- `rule_id`, `rule_type`, `target`, `target_name`, `action`, `status`
-- `hit_count`, `last_hit` — how often the rule has been triggered
-- `time_quota_minutes`, `time_used_minutes` — for time limit rules
-- `schedule_display` — human-readable schedule (e.g., "weekdays at 22:00 for 1h")
-- `scope_type`, `scope_value`, `direction`
+**Rule switches** expose: `rule_id`, `rule_type`, `target`, `action`, `status`, `hit_count`, `last_hit`, `time_quota_minutes`, `time_used_minutes`, `schedule_display`, `scope_type`, `scope_value`, `direction`, `resumeTs` (auto-resume timestamp when paused).
 
-**Time limit sensors** expose:
-- `app`, `quota`, `used`, `remaining`, `reached`
-- `schedule_display`, `hit_count`, `paused`
+**Time limit sensors** expose: `app`, `quota_minutes`, `used_minutes`, `remaining_minutes`, `usage_percent` (capped at 100), `reached`, `paused`, `schedule`, `hit_count`.
 
-**Activity sensors** expose:
-- `online_devices`, `total_devices`, `active_devices`
-- `download_delta_bytes` — bytes downloaded since last poll
+**Device online sensors** expose: `mac`, `ip`, `mac_vendor`, `network`, `last_seen`, `ip_reserved`, `download_24h_mb`, `upload_24h_mb`.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                 Home Assistant                        │
-│                                                       │
-│  ┌────────────┐  ┌──────────┐  ┌───────────────────┐ │
-│  │  switch.py  │  │ sensor.py │  │ binary_sensor.py  │ │
-│  │ RuleSwitch  │  │ Summary   │  │ UserActivity      │ │
-│  │ GroupInternet│  │ TimeLimit │  │                   │ │
-│  │ GroupRule   │  │           │  │                   │ │
-│  └──────┬──────┘  └─────┬─────┘  └────────┬──────────┘ │
-│         │               │                  │            │
-│         └───────────────┼──────────────────┘            │
-│                         │                               │
-│              ┌──────────▼──────────┐                    │
-│              │   coordinator.py     │                    │
-│              │ DataUpdateCoordinator│                    │
-│              │  + MSP API Client    │                    │
-│              └──────────┬──────────┘                    │
-│                         │                               │
-└─────────────────────────┼───────────────────────────────┘
-                          │ HTTPS
-              ┌───────────▼───────────┐
-              │  Firewalla MSP API v2  ���
-              │  /v2/rules             │
-              │  /v2/devices           │
-              │  /v2/users             │
-              │  /v2/rules/{id}/pause  │
-              │  /v2/rules/{id}/resume │
-              └───────────────────────┘
+Home Assistant
++-----------+  +----------+  +---------------+
+| switch.py |  | sensor.py|  | binary_sensor |
+| RuleSwitch|  | Summary  |  | UserActivity  |
+| GroupInet |  | TimeLimit|  | DeviceOnline  |
+| GroupRule |  | Bandwidth|  |               |
++-----+-----+  +----+-----+  +------+--------+
+      |              |               |
+      +--------------+---------------+
+                     |
+          +----------v----------+
+          |   coordinator.py    |
+          | DataUpdateCoordinator|
+          |  + MSP API Client   |
+          +----------+----------+
+                     | HTTPS
+          +----------v----------+
+          | Firewalla MSP API v2|
+          | /v2/rules           |
+          | /v2/devices         |
+          | /v2/users           |
+          | /v2/rules/{id}/pause|
+          | /v2/rules/{id}/resume|
+          +---------------------+
 ```
 
-### Polling Strategy (Split-Polling)
+### API Endpoints Used
 
-The coordinator uses a tiered polling strategy to minimize API calls while keeping time-sensitive data fresh:
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/v2/rules` | GET | Fetch all rules (with optional `?query=` filter) |
+| `/v2/rules?query=action:timelimit` | GET | Lightweight timelimit-only fetch (split-polling) |
+| `/v2/rules/{id}/pause` | POST | Pause a rule |
+| `/v2/rules/{id}/resume` | POST | Resume a paused rule |
+| `/v2/rules/{id}` | GET | Get individual rule status |
+| `/v2/devices` | GET | Fetch all devices (online status, bandwidth, groups) |
+| `/v2/users` | GET | Fetch users (names, affiliatedTag for group mapping) |
+
+### Scope Types
+
+Rules can be scoped to different levels:
+
+| `scope.type` | `scope.value` | How it's used |
+|---|---|---|
+| `group` | Group ID | Group internet switches, group rule switches, Internet time limits |
+| `user` | User ID | App time limits (YouTube, Facebook, etc.) |
+| `device` | MAC address | Shown as generic rule switch with scope attributes |
+| `network` | Network ID | Shown as generic rule switch with scope attributes |
+| *(absent)* | — | Global rule, shown as generic rule switch |
+
+### Split-Polling Strategy
 
 | Data | Refresh Rate | Payload | Rationale |
 |------|-------------|---------|-----------|
-| Time limit rules | Every 30s (base poll) | ~5.5 KB (8 rules) | Minutes remaining change constantly |
-| All rules | Configurable (default 3 min) | ~55 KB (100 rules) | Rule status changes are rare |
-| Devices | Configurable (default 60s) | ~45 KB (176 devices) | Activity detection uses 5-min cooldown |
-| Users | Configurable (default 10 min) | ~2 KB (6 users) | Names and group affiliations rarely change |
+| Time limit rules | Every 30s (base poll) | ~5.5 KB | Minutes remaining change constantly |
+| All rules | Configurable (default 3 min) | ~55 KB | Rule status changes are rare |
+| Devices | Configurable (default 60s) | ~45 KB | Activity uses 5-min cooldown |
+| Users | Configurable (default 10 min) | ~2 KB | Names rarely change |
 
-**Default daily API calls:** ~2,880 timelimit + ~480 full rules + ~1,440 devices + ~144 users = **~4,944 calls/day**
-(vs. ~8,640 calls/day without optimization — **43% reduction**)
+### Time Limit Detection
+
+Firewalla represents time limits in two ways:
+- `action: timelimit` + `scope: user` — app-specific limits (e.g., YouTube 60 min/day)
+- `action: block` + `target: internet` + `scope: group` with `timeUsage` — Internet time limits (e.g., 2 hr/day)
+
+Both are detected and surfaced as time limit sensors with `usage_percent` (capped at 100%).
 
 ### Key Patterns
 
-- **Data flow:** Coordinator polls API → processes rules/groups/users → platforms read from `coordinator.data`
-- **Dynamic lifecycle:** Coordinator listener callbacks track known entity IDs; new entities are added, removed entities are cleaned from the entity registry
-- **Optimistic updates:** Switch toggles update local state immediately via `async_write_ha_state()`, confirmed on next poll
-- **Group name resolution:** `/v2/users` returns friendly names with `affiliatedTag` mapping UUID group names to user names (e.g., group "BFB913AE-..." → "Harvey")
-- **Activity detection:** Tracks `totalDownload` deltas per group with 10 KB threshold and 5-minute cooldown to filter background noise
+- **Dynamic naming:** Entity names derived from API fields (`action`, `target.type`, `target.value`). No hardcoded English strings.
+- **Device names:** Group name from API (e.g., "Matt"), resolved via user `affiliatedTag` mapping.
+- **Dynamic lifecycle:** Coordinator listener callbacks track known entity IDs; entities auto-add/remove.
+- **Optimistic updates:** Switch toggles update local state immediately via `async_write_ha_state()`.
+- **Activity detection:** Tracks `totalDownload` deltas per group with 10 KB threshold and 5-minute cooldown.
 
 ## Dashboard
 
-A pre-built parental control dashboard template is included at `custom_components/firewalla/dashboard/firewalla_parental.yaml`.
-
 ### Prerequisites
 
-Install the **auto-entities** custom card from HACS (HACS > Frontend > Search "auto-entities" > Install).
+Install from HACS:
+- **auto-entities** — auto-discovers entities by pattern
+- **entity-progress-card** — color-coded progress bars for time limits
 
-### Setup
+### Layout
 
-1. Go to **Settings > Dashboards > Add Dashboard**
-2. Choose "New dashboard from scratch", name it "Firewalla"
-3. Open the dashboard, click the 3-dots menu > **Edit Dashboard**
-4. Click the 3-dots menu again > **Raw Configuration Editor**
-5. Paste the contents of `firewalla_parental.yaml` and save
+The dashboard uses a per-kid column layout with sections view (`max_columns: 3`):
 
-The dashboard auto-discovers all Firewalla user groups and their entities using regex patterns. When you add a new child on Firewalla, their card appears automatically after the next coordinator poll.
+Each kid's column contains:
+1. **Activity tile** — online/offline with traffic detection
+2. **Internet tile** — toggle switch
+3. **Bandwidth (24h)** — download and upload in GB
+4. **Time limits** — entity-progress-card with usage percentage (green/orange/red)
+5. **Devices** — per-device online/offline with last-changed
+6. **Blocks** — content block toggles
+
+Time limit progress bars use `usage_percent` attribute with thresholds:
+- Green: 0-50% used
+- Orange: 50-80% used
+- Red: 80-100% used (approaching/reached limit)
+
+### Dashboard Updates
+
+The dashboard is managed via the HA WebSocket API:
+```python
+ws.send({"type": "lovelace/config/save", "url_path": "dashboard-firewalla", "config": {...}})
+```
 
 ## Troubleshooting
 
 ### "Failed to pause/resume rule" errors
 
-- Check that your Personal Access Token has write permissions in MSP settings
+- Check that your Personal Access Token has write permissions
 - Verify the Firewalla box is online and reachable
+
+### Token expired / Authentication failed
+
+- Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure**
+- Enter a fresh token from your Firewalla MSP portal
+- Firewalla MSP tokens (Google OAuth) expire after ~1 hour
 
 ### Entities not appearing
 
 - Check **Settings > Devices & Services > Firewalla** for error messages
-- Enable debug logging: add `custom_components.firewalla: debug` to your `configuration.yaml` logger
+- Enable debug logging: add `custom_components.firewalla: debug` to `configuration.yaml`
+- Time limit sensors only appear for active (non-paused) time limits with quota > 0
 
 ### Rate limiting (HTTP 429)
 
-- Increase the polling intervals in the integration options
-- The integration automatically retries with exponential backoff (1s, 2s, 4s, 8s)
+- Increase polling intervals in the integration options
+- The integration retries with exponential backoff (1s, 2s, 4s, 8s)
 
-### Activity sensors showing false positives
+### Orphaned entities
 
-- Activity detection uses a 10 KB threshold and 5-minute cooldown
-- Background keep-alive traffic from devices can cause brief false positives
-- Devices polling at 60s intervals means activity detection has ~60s granularity
+- If Firewalla rules are deleted, the integration removes corresponding HA entities automatically
+- Stale entities can be manually removed via **Settings > Entities**
 
 ## Development
 
@@ -227,6 +277,14 @@ pytest tests/ -k "test_split_polling" -v
 - Split-polling behavior, configurable intervals, activity detection, group processing
 - Dynamic entity lifecycle (add/remove)
 - Optimistic state updates
+- Internet time limit detection (group-scoped block rules with timeUsage)
+
+## API Reference
+
+- [Firewalla MSP API Docs](https://docs.firewalla.net)
+- [MSP API Examples](https://github.com/firewalla/msp-api-examples)
+- [Rule Data Model](https://docs.firewalla.net/api/docs/data-models/rule/)
+- [Device Data Model](https://docs.firewalla.net/api/docs/data-models/device/)
 
 ## License
 
