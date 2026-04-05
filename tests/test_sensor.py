@@ -324,9 +324,8 @@ class TestFirewallaTimeLimitSensor:
         coordinator = self._make_coordinator(time_limits=time_limits, groups=groups)
         sensor = FirewallaTimeLimitSensor(coordinator, "33", "r1")
         assert sensor._attr_unique_id == "firewalla_timelimit_33_r1"
-        assert "Harvey" in sensor._attr_name
-        assert "Roblox" in sensor._attr_name
-        assert sensor._attr_name.endswith("Time")
+        assert sensor._attr_name == "Roblox"
+        assert sensor._attr_has_entity_name is True
         assert sensor._attr_has_entity_name is True
 
     def test_native_value_remaining(self):

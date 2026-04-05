@@ -74,10 +74,10 @@ class FirewallaUserActivitySensor(CoordinatorEntity, BinarySensorEntity):
         group = self._get_group_data()
         group_name = group["name"] if group else group_id
         self._attr_unique_id = f"firewalla_user_{group_id}_active"
-        self._attr_name = f"{group_name} Active"
+        self._attr_name = "Active"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"group_{group_id}")},
-            name=f"Firewalla Group: {group_name}",
+            name=group_name,
             manufacturer=DEVICE_MANUFACTURER,
             model="Group",
             via_device=(DOMAIN, coordinator.box_gid),

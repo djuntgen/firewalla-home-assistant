@@ -846,7 +846,8 @@ class TestFirewallaGroupInternetSwitch:
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupInternetSwitch(coordinator, "28")
         assert switch._attr_unique_id == "firewalla_group_28_internet"
-        assert "Matt" in switch._attr_name
+        assert "Block" in switch._attr_name
+        assert "Internet" in switch._attr_name
         assert switch._attr_has_entity_name is True
 
     def test_is_on_internet_allowed(self):
@@ -945,7 +946,7 @@ class TestFirewallaGroupRuleSwitch:
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
         assert switch._attr_unique_id == "firewalla_group_28_rule_r2"
-        assert "Matt" in switch._attr_name
+        assert "Block" in switch._attr_name
         assert "Porn" in switch._attr_name
         assert switch._attr_has_entity_name is True
 

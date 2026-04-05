@@ -24,7 +24,7 @@ class TestFirewallaUserActivitySensor:
         coordinator = self._make_coordinator(groups=groups)
         sensor = FirewallaUserActivitySensor(coordinator, "28")
         assert sensor._attr_unique_id == "firewalla_user_28_active"
-        assert "Matt" in sensor._attr_name
+        assert sensor._attr_name == "Active"
         assert sensor._attr_has_entity_name is True
 
     def test_is_on_when_active(self):

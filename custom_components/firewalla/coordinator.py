@@ -892,6 +892,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     ),
                     "ts": rule_info.get("ts", 0),
                     "updateTs": rule_info.get("updateTs", 0),
+                    "resumeTs": rule_info.get("resumeTs"),
                     # Additional fields
                     "schedule": rule_info.get("schedule"),
                     "hit": rule_info.get("hit", {}),

@@ -356,7 +356,7 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
         for key in RULE_ATTRIBUTES:
             if key in current:
                 value = current[key]
-                if key in ("created_at", "modified_at") and isinstance(
+                if key in ("created_at", "modified_at", "resumeTs") and isinstance(
                     value, (int, float)
                 ):
                     formatted = _format_timestamp(value)
@@ -524,8 +524,13 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
         self._group_id = group_id
         group = self._get_group_data()
         group_name = group["name"] if group else group_id
+        # Derive name from the underlying rule's action + target type
+        rule_id = group.get("internet_block_rule_id") if group else None
+        rule = self.coordinator.data.get("rules", {}).get(rule_id, {}) if rule_id else {}
+        action = rule.get("action", "block").title()
+        target_type = rule.get("type", "internet").title()
         self._attr_unique_id = f"firewalla_group_{group_id}_internet"
-        self._attr_name = f"{group_name} Internet Access"
+        self._attr_name = f"{action} {target_type}"
         self._attr_icon = "mdi:web"
         self._attr_device_info = self._build_device_info()
 
@@ -539,7 +544,7 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
         group_name = group["name"] if group else self._group_id
         return DeviceInfo(
             identifiers={(DOMAIN, f"group_{self._group_id}")},
-            name=f"Firewalla Group: {group_name}",
+            name=group_name,
             manufacturer=DEVICE_MANUFACTURER,
             model="Group",
             via_device=(DOMAIN, self.coordinator.box_gid),
@@ -631,13 +636,14 @@ class FirewallaGroupRuleSwitch(CoordinatorEntity, SwitchEntity):
         group = self._get_group_data()
         rule_info = self._get_rule_info()
         group_name = group["name"] if group else group_id
+        action = (rule_info["action"] if rule_info else "block").title()
         target = (rule_info["value"] if rule_info else "unknown").title()
         self._attr_unique_id = f"firewalla_group_{group_id}_rule_{rule_id}"
-        self._attr_name = f"{group_name} {target} Block"
+        self._attr_name = f"{action} {target}"
         self._attr_icon = "mdi:shield-lock"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"group_{group_id}")},
-            name=f"Firewalla Group: {group_name}",
+            name=group_name,
             manufacturer=DEVICE_MANUFACTURER,
             model="Group",
             via_device=(DOMAIN, coordinator.box_gid),

@@ -96,19 +96,22 @@ ENTITY_ID_FORMATS = {
     "rules_sensor": "firewalla_rules_summary",
 }
 
-# Rule types from Firewalla API
+# Rule target types from Firewalla API (exhaustive per API docs)
 RULE_TYPES = {
-    "internet": "Internet Access",
+    "app": "Application",
     "category": "Category",
     "domain": "Domain",
+    "internet": "Internet Access",
+    "intranet": "Intranet Access",
+    "ip": "IP Address",
+    "net": "Network CIDR",
+    "region": "Region",
+    "remotePort": "Remote Port",
+    "targetlist": "Target List",
+    # Legacy/undocumented types seen in the wild
     "device": "Device",
     "gaming": "Gaming",
     "time": "Time-based Rule",
-    "app": "Application",
-    "intranet": "Intranet Access",
-    "targetlist": "Target List",
-    "region": "Region",
-    "ip": "IP Address",
 }
 
 # Rule actions
@@ -180,6 +183,7 @@ RULE_ATTRIBUTES = [
     "scope_type",
     "scope_value",
     "direction",
+    "resumeTs",
 ]
 
 # Sensor attributes for rules summary
