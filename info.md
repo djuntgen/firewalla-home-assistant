@@ -60,7 +60,7 @@ The integration uses a configuration flow to set up:
 
 ## Use Cases
 
-- **Parental Controls**: Pause/unpause internet restrictions for kids
+- **Parental Controls**: Pause/unpause internet restrictions for users
 - **Work Hours**: Activate productivity rules during work hours
 - **Gaming Management**: Control gaming access based on schedules
 - **Automation Integration**: Include rule control in complex automations

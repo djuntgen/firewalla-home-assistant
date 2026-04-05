@@ -624,7 +624,7 @@ class TestFirewallaMSPClientDevicesUsers:
     async def test_get_devices(self, mock_aiohttp_session):
         client = FirewallaMSPClient(mock_aiohttp_session, "test.firewalla.net", "test_token")
         mock_devices = [
-            {"id": "AA:BB:CC:DD:EE:FF", "name": "Test Phone", "online": True, "group": {"id": "28", "name": "Matt"}}
+            {"id": "AA:BB:CC:DD:EE:FF", "name": "Test Phone", "online": True, "group": {"id": "28", "name": "Alice"}}
         ]
         mock_response = MagicMock()
         mock_response.status = 200
@@ -639,7 +639,7 @@ class TestFirewallaMSPClientDevicesUsers:
     async def test_get_users(self, mock_aiohttp_session):
         client = FirewallaMSPClient(mock_aiohttp_session, "test.firewalla.net", "test_token")
         mock_users = [
-            {"id": "box:29", "name": "Matt", "affiliatedTag": "28", "devices": ["AA:BB:CC:DD:EE:FF"]}
+            {"id": "box:29", "name": "Alice", "affiliatedTag": "28", "devices": ["AA:BB:CC:DD:EE:FF"]}
         ]
         mock_response = MagicMock()
         mock_response.status = 200
@@ -659,15 +659,15 @@ class TestGroupProcessing:
 
         devices = [
             {"id": "AA:BB:CC:DD:EE:01", "name": "Phone", "online": True, "deviceType": "phone",
-             "group": {"id": "28", "name": "Matt"}},
+             "group": {"id": "28", "name": "Alice"}},
             {"id": "AA:BB:CC:DD:EE:02", "name": "Tablet", "online": False, "deviceType": "tablet",
-             "group": {"id": "28", "name": "Matt"}},
+             "group": {"id": "28", "name": "Alice"}},
             {"id": "AA:BB:CC:DD:EE:03", "name": "Camera", "online": True, "deviceType": "camera",
              "group": {"id": "25", "name": "Cameras"}},
             {"id": "AA:BB:CC:DD:EE:04", "name": "Laptop", "online": True, "deviceType": "desktop"},
         ]
         users = [
-            {"id": "box:29", "name": "Matt", "affiliatedTag": "28",
+            {"id": "box:29", "name": "Alice", "affiliatedTag": "28",
              "devices": ["AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"],
              "download": 1000, "upload": 500},
         ]
@@ -679,7 +679,7 @@ class TestGroupProcessing:
         groups = _build_groups(devices, users, rules)
 
         assert "28" in groups
-        assert groups["28"]["name"] == "Matt"
+        assert groups["28"]["name"] == "Alice"
         assert groups["28"]["is_user_group"] is True
         assert groups["28"]["user_id"] == "box:29"
         assert groups["28"]["device_count"] == 2
@@ -696,23 +696,23 @@ class TestGroupProcessing:
         from custom_components.firewalla.coordinator import _build_groups
 
         devices = [
-            {"id": "AA:BB:CC:DD:EE:01", "name": "Harvey Tablet", "online": True, "deviceType": "tablet",
+            {"id": "AA:BB:CC:DD:EE:01", "name": "Bob Tablet", "online": True, "deviceType": "tablet",
              "group": {"id": "32", "name": "BFB913AE-49E7-4465-961D-6FB1496147DF"}},
         ]
         users = [
-            {"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": ["AA:BB:CC:DD:EE:01"],
+            {"id": "box:33", "name": "Bob", "affiliatedTag": "32", "devices": ["AA:BB:CC:DD:EE:01"],
              "download": 0, "upload": 0},
         ]
 
         groups = _build_groups(devices, users, {})
-        assert groups["32"]["name"] == "Harvey"
+        assert groups["32"]["name"] == "Bob"
 
     def test_build_groups_internet_paused(self):
         from custom_components.firewalla.coordinator import _build_groups
 
         devices = [
             {"id": "AA:BB:CC:DD:EE:01", "name": "Phone", "online": True, "deviceType": "phone",
-             "group": {"id": "28", "name": "Matt"}},
+             "group": {"id": "28", "name": "Alice"}},
         ]
         rules = {
             "rule1": {"id": "rule1", "action": "block", "type": "internet", "scope_type": "group", "scope_value": "28", "paused": True},
@@ -731,7 +731,7 @@ class TestGroupProcessing:
 class TestGroupRulesAndTimeLimits:
     def test_build_groups_tracks_all_rules(self):
         from custom_components.firewalla.coordinator import _build_groups
-        devices = [{"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone", "group": {"id": "28", "name": "Matt"}}]
+        devices = [{"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone", "group": {"id": "28", "name": "Alice"}}]
         rules = {
             "r1": {"id": "r1", "action": "block", "type": "internet", "value": "", "scope_type": "group", "scope_value": "28", "paused": False, "status": "active", "hit_count": 100},
             "r2": {"id": "r2", "action": "block", "type": "category", "value": "porn", "scope_type": "group", "scope_value": "28", "paused": False, "status": "active", "hit_count": 50},
@@ -751,7 +751,7 @@ class TestGroupRulesAndTimeLimits:
 
     def test_build_time_limits(self):
         from custom_components.firewalla.coordinator import _build_time_limits
-        users = [{"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
+        users = [{"id": "box:33", "name": "Bob", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
         rules = {
             "r1": {"id": "r1", "action": "timelimit", "type": "app", "value": "roblox",
                    "scope_type": "user", "scope_value": "33", "paused": False,
@@ -764,7 +764,7 @@ class TestGroupRulesAndTimeLimits:
         }
         tl = _build_time_limits(users, rules)
         assert "33" in tl
-        assert tl["33"]["user_name"] == "Harvey"
+        assert tl["33"]["user_name"] == "Bob"
         assert len(tl["33"]["limits"]) == 2
         r = tl["33"]["limits"]["r1"]
         assert r["app"] == "roblox"
@@ -775,7 +775,7 @@ class TestGroupRulesAndTimeLimits:
 
     def test_build_time_limits_not_reached(self):
         from custom_components.firewalla.coordinator import _build_time_limits
-        users = [{"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
+        users = [{"id": "box:33", "name": "Bob", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
         rules = {
             "r1": {"id": "r1", "action": "timelimit", "type": "app", "value": "facebook",
                    "scope_type": "user", "scope_value": "33", "paused": False,
@@ -793,7 +793,7 @@ class TestGroupRulesAndTimeLimits:
 
     def test_build_time_limits_ignores_non_timelimit(self):
         from custom_components.firewalla.coordinator import _build_time_limits
-        users = [{"id": "box:33", "name": "Harvey", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
+        users = [{"id": "box:33", "name": "Bob", "affiliatedTag": "32", "devices": [], "download": 0, "upload": 0}]
         rules = {
             "r1": {"id": "r1", "action": "block", "type": "internet", "value": "",
                    "scope_type": "user", "scope_value": "33", "paused": False,
@@ -806,7 +806,7 @@ class TestGroupRulesAndTimeLimits:
         from custom_components.firewalla.coordinator import _build_groups
         devices = [
             {"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone",
-             "totalDownload": 10000, "group": {"id": "28", "name": "Matt"}},
+             "totalDownload": 10000, "group": {"id": "28", "name": "Alice"}},
         ]
         # First poll — no previous data, should not be active
         groups = _build_groups(devices, [], {}, previous_downloads=None)
@@ -825,7 +825,7 @@ class TestGroupRulesAndTimeLimits:
         from custom_components.firewalla.coordinator import _build_groups
         devices = [
             {"id": "AA:BB", "name": "Phone", "online": True, "deviceType": "phone",
-             "totalDownload": 15000, "group": {"id": "28", "name": "Matt"}},
+             "totalDownload": 15000, "group": {"id": "28", "name": "Alice"}},
         ]
         groups = _build_groups(devices, [], {}, previous_downloads={"28": 10000})
         assert groups["28"]["active"] is False  # 5000 bytes < 10240 threshold

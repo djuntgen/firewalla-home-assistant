@@ -106,7 +106,7 @@ Configure which Firewalla rules appear in Home Assistant using powerful filterin
 - `-target.type:category` - Hide category rules (show 49 instead of 83)
 
 #### Combined Examples
-**Parent Dashboard**: Show only kids' device rules
+**Parent Dashboard**: Show only users' device rules
 ```
 Include: scope.value:"FC:34:97:A5:9F:91"
 Result: 8 device-specific rules (av, social, facebook)

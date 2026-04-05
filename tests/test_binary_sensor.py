@@ -17,7 +17,7 @@ class TestFirewallaUserActivitySensor:
         return coordinator
 
     def test_init(self):
-        groups = {"28": {"name": "Matt", "is_user_group": True, "active": True,
+        groups = {"28": {"name": "Alice", "is_user_group": True, "active": True,
                          "devices": [], "total_download": 1000, "download_delta": 500,
                          "device_count": 5, "user_id": "box:29", "internet_block_rule_id": None,
                          "internet_blocked": False, "rule_count": 0, "download": 0, "upload": 0, "group_rules": {}}}
@@ -28,7 +28,7 @@ class TestFirewallaUserActivitySensor:
         assert sensor._attr_has_entity_name is True
 
     def test_is_on_when_active(self):
-        groups = {"28": {"name": "Matt", "is_user_group": True, "active": True,
+        groups = {"28": {"name": "Alice", "is_user_group": True, "active": True,
                          "devices": [{"name": "Phone", "online": True, "total_download": 1000}],
                          "total_download": 1000, "download_delta": 5000,
                          "device_count": 1, "user_id": None, "internet_block_rule_id": None,
@@ -38,7 +38,7 @@ class TestFirewallaUserActivitySensor:
         assert sensor.is_on is True
 
     def test_is_off_when_idle(self):
-        groups = {"28": {"name": "Matt", "is_user_group": True, "active": False,
+        groups = {"28": {"name": "Alice", "is_user_group": True, "active": False,
                          "devices": [{"name": "Phone", "online": True, "total_download": 1000}],
                          "total_download": 1000, "download_delta": 0,
                          "device_count": 1, "user_id": None, "internet_block_rule_id": None,
@@ -48,7 +48,7 @@ class TestFirewallaUserActivitySensor:
         assert sensor.is_on is False
 
     def test_available(self):
-        groups = {"28": {"name": "Matt", "is_user_group": True, "active": False,
+        groups = {"28": {"name": "Alice", "is_user_group": True, "active": False,
                          "devices": [], "total_download": 0, "download_delta": 0,
                          "device_count": 0, "user_id": None, "internet_block_rule_id": None,
                          "internet_blocked": False, "rule_count": 0, "download": 0, "upload": 0, "group_rules": {}}}
@@ -66,7 +66,7 @@ class TestFirewallaUserActivitySensor:
             {"name": "Phone", "online": True, "mac": "AA:BB", "type": "phone", "ip": "1.1.1.1", "total_download": 1000},
             {"name": "Tablet", "online": False, "mac": "CC:DD", "type": "tablet", "ip": "1.1.1.2", "total_download": 500},
         ]
-        groups = {"28": {"name": "Matt", "is_user_group": True, "active": True,
+        groups = {"28": {"name": "Alice", "is_user_group": True, "active": True,
                          "devices": devices, "total_download": 1500, "download_delta": 2048,
                          "device_count": 2, "user_id": None, "internet_block_rule_id": None,
                          "internet_blocked": False, "rule_count": 0, "download": 0, "upload": 0, "group_rules": {}}}

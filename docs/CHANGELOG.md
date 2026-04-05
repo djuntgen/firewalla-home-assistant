@@ -12,7 +12,7 @@
   - `usage_percent` attribute on time limit sensors (capped at 100%)
   - Each group becomes its own HA device, named from the Firewalla user name
 
-- **Per-kid bandwidth sensors**
+- **Per-user bandwidth sensors**
   - 24h download and upload in GB per user group
   - Attributes: bytes, MB values
 
@@ -65,7 +65,7 @@
   - `scope_type`, `scope_value`, `direction`, `resumeTs`
 
 - **Parental control dashboard**
-  - Per-kid columns with activity, internet, bandwidth, time limits, devices, blocks
+  - Per-user columns with activity, internet, bandwidth, time limits, devices, blocks
   - Uses tile cards, entity-progress-card, and auto-entities
   - Time limit progress bars with color thresholds (green/orange/red)
 

@@ -8,34 +8,40 @@
 # 5. Click the 3 dots menu again > Raw Configuration Editor
 # 6. Paste this entire file and save
 #
-# Each kid gets their own column with activity, internet toggle,
-# time limits (progress bars), and content block switches.
-# New apps/rules auto-discover within each kid's column.
+# IMPORTANT: Replace the placeholder names (User_A, User_B, User_C) and
+# entity_id slugs (user_a, user_b, user_c) with your actual Firewalla
+# group names. The slugs must match the lowercase names used in your
+# Home Assistant entity IDs (e.g., firewalla_group_alice_alice_active).
 #
-# To add a new kid: duplicate a section and change the name/slug.
+# Each user gets their own column with activity, internet toggle,
+# time limits (progress bars), and content block switches.
+# New apps/rules auto-discover within each user's column.
+#
+# To add a new user: duplicate a section and change the name/slug.
 # Entity ID pattern: firewalla_group_{slug}_{slug}_{entity}
 
 title: Firewalla Parental Controls
 views:
-  - title: Kids
-    path: kids
+  - title: Users
+    path: users
     icon: mdi:shield-account
     type: sections
     max_columns: 3
     sections:
-      # ── Matt ──────────────────────────────────────────────
+      # ── User_A ─────────────────────────────────────────────
+      # Replace "User_A" / "user_a" with your first group name
       - type: grid
-        title: Matt
+        title: User_A
         cards:
           - type: custom:auto-entities
             card:
               type: entities
             filter:
               include:
-                - entity_id: "/binary_sensor\\.firewalla_group_matt_matt_active/"
+                - entity_id: "/binary_sensor\\.firewalla_group_user_a_user_a_active/"
                   options:
                     secondary_info: last-changed
-                - entity_id: "/switch\\.firewalla_group_matt_matt_internet_access/"
+                - entity_id: "/switch\\.firewalla_group_user_a_user_a_internet_access/"
 
           - type: custom:auto-entities
             card:
@@ -43,7 +49,7 @@ views:
               title: Time Limits
             filter:
               include:
-                - entity_id: "/sensor\\.firewalla_group_matt_.*_time/"
+                - entity_id: "/sensor\\.firewalla_group_user_a_.*_time/"
                   options:
                     type: custom:mushroom-entity-row
                     fill_container: true
@@ -56,26 +62,27 @@ views:
               title: Blocks
             filter:
               include:
-                - entity_id: "/switch\\.firewalla_group_matt_matt_.*_block/"
+                - entity_id: "/switch\\.firewalla_group_user_a_user_a_.*_block/"
               exclude:
                 - entity_id: "/.*_doh_block/"
-                - entity_id: "switch.firewalla_group_matt_matt_block$"
+                - entity_id: "switch.firewalla_group_user_a_user_a_block$"
             sort:
               method: friendly_name
 
-      # ── Harvey ────────────────────────────────────────────
+      # ── User_B ─────────────────────────────────────────────
+      # Replace "User_B" / "user_b" with your second group name
       - type: grid
-        title: Harvey
+        title: User_B
         cards:
           - type: custom:auto-entities
             card:
               type: entities
             filter:
               include:
-                - entity_id: "/binary_sensor\\.firewalla_group_harvey_harvey_active/"
+                - entity_id: "/binary_sensor\\.firewalla_group_user_b_user_b_active/"
                   options:
                     secondary_info: last-changed
-                - entity_id: "/switch\\.firewalla_group_harvey_harvey_internet_access/"
+                - entity_id: "/switch\\.firewalla_group_user_b_user_b_internet_access/"
 
           - type: custom:auto-entities
             card:
@@ -83,7 +90,7 @@ views:
               title: Time Limits
             filter:
               include:
-                - entity_id: "/sensor\\.firewalla_group_harvey_.*_time/"
+                - entity_id: "/sensor\\.firewalla_group_user_b_.*_time/"
                   options:
                     type: custom:mushroom-entity-row
                     fill_container: true
@@ -96,26 +103,27 @@ views:
               title: Blocks
             filter:
               include:
-                - entity_id: "/switch\\.firewalla_group_harvey_harvey_.*_block/"
+                - entity_id: "/switch\\.firewalla_group_user_b_user_b_.*_block/"
               exclude:
                 - entity_id: "/.*_doh_block/"
-                - entity_id: "switch.firewalla_group_harvey_harvey_block$"
+                - entity_id: "switch.firewalla_group_user_b_user_b_block$"
             sort:
               method: friendly_name
 
-      # ── Elaine ────────────────────────────────────────────
+      # ── User_C ─────────────────────────────────────────────
+      # Replace "User_C" / "user_c" with your third group name
       - type: grid
-        title: Elaine
+        title: User_C
         cards:
           - type: custom:auto-entities
             card:
               type: entities
             filter:
               include:
-                - entity_id: "/binary_sensor\\.firewalla_group_elaine_elaine_active/"
+                - entity_id: "/binary_sensor\\.firewalla_group_user_c_user_c_active/"
                   options:
                     secondary_info: last-changed
-                - entity_id: "/switch\\.firewalla_group_elaine_elaine_internet_access/"
+                - entity_id: "/switch\\.firewalla_group_user_c_user_c_internet_access/"
 
           - type: custom:auto-entities
             card:
@@ -123,7 +131,7 @@ views:
               title: Time Limits
             filter:
               include:
-                - entity_id: "/sensor\\.firewalla_group_elaine_.*_time/"
+                - entity_id: "/sensor\\.firewalla_group_user_c_.*_time/"
                   options:
                     type: custom:mushroom-entity-row
                     fill_container: true
@@ -136,9 +144,9 @@ views:
               title: Blocks
             filter:
               include:
-                - entity_id: "/switch\\.firewalla_group_elaine_elaine_.*_block/"
+                - entity_id: "/switch\\.firewalla_group_user_c_user_c_.*_block/"
               exclude:
                 - entity_id: "/.*_doh_block/"
-                - entity_id: "switch.firewalla_group_elaine_elaine_block$"
+                - entity_id: "switch.firewalla_group_user_c_user_c_block$"
             sort:
               method: friendly_name

@@ -8,7 +8,7 @@ A custom Home Assistant integration for managing Firewalla firewall rules, group
 - **Group internet switches** — per-group internet control, derived from `action` + `target.type` API fields
 - **Per-group rule switches** — category/app block rules per group, named from API data (`action` + `target.value`)
 - **Time limit sensors** — per-user app and internet time limits with remaining minutes, quota, used, usage percentage
-- **Per-kid bandwidth sensors** — 24h download/upload in GB per user group
+- **Per-user bandwidth sensors** — 24h download/upload in GB per user group
 - **Per-device online sensors** — online/offline status for each device with IP, MAC vendor, network, last seen
 - **User activity sensors** — binary sensors detecting active internet usage per user (10 KB threshold, 5-minute cooldown)
 - **Rules summary sensor** — overview of total/active/paused rules with breakdown by type
@@ -106,7 +106,7 @@ All entity names are derived from API data. Users can override display names via
 
 ### Device Grouping
 
-Each Firewalla user group becomes an HA **device** named after the user (e.g., "Matt", "Harvey"). All entities for that user are grouped under their device. The device name comes directly from the Firewalla API — no "Firewalla Group:" prefix.
+Each Firewalla user group becomes an HA **device** named after the user (e.g., "Alice", "Bob"). All entities for that user are grouped under their device. The device name comes directly from the Firewalla API — no "Firewalla Group:" prefix.
 
 ### Entity Attributes
 
@@ -189,7 +189,7 @@ Both are detected and surfaced as time limit sensors with `usage_percent` (cappe
 ### Key Patterns
 
 - **Dynamic naming:** Entity names derived from API fields (`action`, `target.type`, `target.value`). No hardcoded English strings.
-- **Device names:** Group name from API (e.g., "Matt"), resolved via user `affiliatedTag` mapping.
+- **Device names:** Group name from API (e.g., "Alice"), resolved via user `affiliatedTag` mapping.
 - **Dynamic lifecycle:** Coordinator listener callbacks track known entity IDs; entities auto-add/remove.
 - **Optimistic updates:** Switch toggles update local state immediately via `async_write_ha_state()`.
 - **Activity detection:** Tracks `totalDownload` deltas per group with 10 KB threshold and 5-minute cooldown.
@@ -204,9 +204,9 @@ Install from HACS:
 
 ### Layout
 
-The dashboard uses a per-kid column layout with sections view (`max_columns: 3`):
+The dashboard uses a per-user column layout with sections view (`max_columns: 3`):
 
-Each kid's column contains:
+Each user's column contains:
 1. **Activity tile** — online/offline with traffic detection
 2. **Internet tile** — toggle switch
 3. **Bandwidth (24h)** — download and upload in GB

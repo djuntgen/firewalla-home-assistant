@@ -840,7 +840,7 @@ class TestFirewallaGroupInternetSwitch:
 
     def test_init(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29",
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": "box:29",
                          "device_count": 5, "devices": [], "internet_block_rule_id": "rule1",
                          "internet_blocked": True, "rule_count": 6, "download": 1000, "upload": 500}}
         coordinator = self._make_coordinator(groups=groups)
@@ -852,7 +852,7 @@ class TestFirewallaGroupInternetSwitch:
 
     def test_is_on_internet_allowed(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": False,
+        groups = {"28": {"name": "Alice", "internet_block_rule_id": "rule1", "internet_blocked": False,
                          "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "rule_count": 1, "download": 0, "upload": 0}}
         coordinator = self._make_coordinator(groups=groups)
@@ -861,7 +861,7 @@ class TestFirewallaGroupInternetSwitch:
 
     def test_is_on_internet_blocked(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": True,
+        groups = {"28": {"name": "Alice", "internet_block_rule_id": "rule1", "internet_blocked": True,
                          "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "rule_count": 1, "download": 0, "upload": 0}}
         coordinator = self._make_coordinator(groups=groups)
@@ -870,7 +870,7 @@ class TestFirewallaGroupInternetSwitch:
 
     def test_available_with_rule(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": True,
+        groups = {"28": {"name": "Alice", "internet_block_rule_id": "rule1", "internet_blocked": True,
                          "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "rule_count": 1, "download": 0, "upload": 0}}
         coordinator = self._make_coordinator(groups=groups)
@@ -879,7 +879,7 @@ class TestFirewallaGroupInternetSwitch:
 
     def test_unavailable_without_rule(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "internet_block_rule_id": None, "internet_blocked": False,
+        groups = {"28": {"name": "Alice", "internet_block_rule_id": None, "internet_blocked": False,
                          "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "rule_count": 0, "download": 0, "upload": 0}}
         coordinator = self._make_coordinator(groups=groups)
@@ -889,7 +889,7 @@ class TestFirewallaGroupInternetSwitch:
     @pytest.mark.asyncio
     async def test_turn_on_pauses_block_rule(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": True,
+        groups = {"28": {"name": "Alice", "internet_block_rule_id": "rule1", "internet_blocked": True,
                          "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "rule_count": 1, "download": 0, "upload": 0}}
         rules = {"rule1": {"id": "rule1", "paused": False, "status": "active"}}
@@ -904,7 +904,7 @@ class TestFirewallaGroupInternetSwitch:
     @pytest.mark.asyncio
     async def test_turn_off_resumes_block_rule(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "internet_block_rule_id": "rule1", "internet_blocked": False,
+        groups = {"28": {"name": "Alice", "internet_block_rule_id": "rule1", "internet_blocked": False,
                          "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "rule_count": 1, "download": 0, "upload": 0}}
         rules = {"rule1": {"id": "rule1", "paused": True, "status": "paused"}}
@@ -918,14 +918,14 @@ class TestFirewallaGroupInternetSwitch:
 
     def test_extra_state_attributes(self):
         from custom_components.firewalla.switch import FirewallaGroupInternetSwitch
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29",
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": "box:29",
                          "device_count": 5, "devices": [], "internet_block_rule_id": "rule1",
                          "internet_blocked": True, "rule_count": 6, "download": 1000, "upload": 500}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupInternetSwitch(coordinator, "28")
         attrs = switch.extra_state_attributes
         assert attrs["group_id"] == "28"
-        assert attrs["group_name"] == "Matt"
+        assert attrs["group_name"] == "Alice"
         assert attrs["device_count"] == 5
 
 
@@ -941,7 +941,7 @@ class TestFirewallaGroupRuleSwitch:
     def test_init_category_block(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 50}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29", "device_count": 5, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": "box:29", "device_count": 5, "devices": [],
                          "internet_block_rule_id": "r1", "internet_blocked": True, "rule_count": 2, "download": 0, "upload": 0, "group_rules": gr}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
@@ -953,7 +953,7 @@ class TestFirewallaGroupRuleSwitch:
     def test_init_app_block(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r3": {"type": "app", "value": "tiktok", "action": "block", "paused": True, "status": "paused", "hit_count": 200}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r3")
@@ -962,7 +962,7 @@ class TestFirewallaGroupRuleSwitch:
     def test_is_on_active_block(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 0}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
@@ -971,7 +971,7 @@ class TestFirewallaGroupRuleSwitch:
     def test_is_off_paused_block(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r3": {"type": "app", "value": "tiktok", "action": "block", "paused": True, "status": "paused", "hit_count": 0}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r3")
@@ -980,7 +980,7 @@ class TestFirewallaGroupRuleSwitch:
     def test_available_true(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 0}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
@@ -988,7 +988,7 @@ class TestFirewallaGroupRuleSwitch:
 
     def test_unavailable_rule_gone(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 0, "download": 0, "upload": 0, "group_rules": {}}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
@@ -998,7 +998,7 @@ class TestFirewallaGroupRuleSwitch:
     async def test_turn_off_pauses_rule(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 0}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
         rules = {"r2": {"id": "r2", "paused": False, "status": "active"}}
         coordinator = self._make_coordinator(groups=groups, rules=rules)
@@ -1013,7 +1013,7 @@ class TestFirewallaGroupRuleSwitch:
     async def test_turn_on_resumes_rule(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r3": {"type": "app", "value": "tiktok", "action": "block", "paused": True, "status": "paused", "hit_count": 0}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": None, "device_count": 1, "devices": [],
                          "internet_block_rule_id": None, "internet_blocked": False, "rule_count": 1, "download": 0, "upload": 0, "group_rules": gr}}
         rules = {"r3": {"id": "r3", "paused": True, "status": "paused"}}
         coordinator = self._make_coordinator(groups=groups, rules=rules)
@@ -1027,7 +1027,7 @@ class TestFirewallaGroupRuleSwitch:
     def test_extra_state_attributes(self):
         from custom_components.firewalla.switch import FirewallaGroupRuleSwitch
         gr = {"r2": {"type": "category", "value": "porn", "action": "block", "paused": False, "status": "active", "hit_count": 50}}
-        groups = {"28": {"name": "Matt", "is_user_group": True, "user_id": "box:29", "device_count": 5, "devices": [],
+        groups = {"28": {"name": "Alice", "is_user_group": True, "user_id": "box:29", "device_count": 5, "devices": [],
                          "internet_block_rule_id": "r1", "internet_blocked": True, "rule_count": 2, "download": 0, "upload": 0, "group_rules": gr}}
         coordinator = self._make_coordinator(groups=groups)
         switch = FirewallaGroupRuleSwitch(coordinator, "28", "r2")
