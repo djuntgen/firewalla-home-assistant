@@ -17,6 +17,9 @@ from .const import (
     API_TIMEOUT,
     AUTH_HEADER_FORMAT,
     CONTENT_TYPE,
+    DEFAULT_DEVICES_INTERVAL,
+    DEFAULT_FULL_RULES_INTERVAL,
+    DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
     MSP_API_V2_BASE,
     RETRY_ATTEMPTS,
@@ -193,25 +196,28 @@ def _build_time_limits(
     users: list,
     rules: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build per-user time limit data from timelimit rules."""
+    """Build per-user time limit data from timelimit and time-capped block rules.
+
+    Firewalla represents time limits in two ways:
+    - action=timelimit, scope=user — app-specific limits (e.g., YouTube 60 min/day)
+    - action=block, target=internet, scope=group, with timeUsage — Internet time limits
+    Both are surfaced as time limit sensors.
+    """
     user_by_scope: dict[str, dict] = {}
+    user_by_group: dict[str, dict] = {}
     for user in users:
         uid = user.get("id", "")
         parts = uid.rsplit(":", 1)
         if len(parts) == 2:
             user_by_scope[parts[1]] = user
+        tag = user.get("affiliatedTag")
+        if tag:
+            user_by_group[tag] = user
 
     time_limits: dict[str, Any] = {}
-    for rule_id, rule in rules.items():
-        if rule.get("action") != "timelimit":
-            continue
-        scope_type = rule.get("scope_type", "")
-        scope_value = str(rule.get("scope_value", ""))
-        if scope_type != "user" or not scope_value:
-            continue
 
+    def _ensure_user_entry(scope_value: str, user_data: dict) -> None:
         if scope_value not in time_limits:
-            user_data = user_by_scope.get(scope_value, {})
             time_limits[scope_value] = {
                 "user_name": user_data.get("name", f"User {scope_value}"),
                 "user_id": user_data.get("id", ""),
@@ -219,12 +225,35 @@ def _build_time_limits(
                 "limits": {},
             }
 
+    for rule_id, rule in rules.items():
         quota = rule.get("time_quota_minutes") or 0
         used = rule.get("time_used_minutes") or 0
+        action = rule.get("action", "")
+        scope_type = rule.get("scope_type", "")
+        scope_value = str(rule.get("scope_value", ""))
+
+        if action == "timelimit" and scope_type == "user" and scope_value:
+            # App-specific time limits (e.g., YouTube 60 min/day)
+            user_data = user_by_scope.get(scope_value, {})
+            _ensure_user_entry(scope_value, user_data)
+        elif quota > 0 and scope_type == "group" and scope_value:
+            # Internet/block rules with time usage (e.g., Internet 2 hr/day)
+            user_data = user_by_group.get(scope_value, {})
+            if not user_data:
+                continue  # skip non-user groups (e.g., "Cameras")
+            # Map group scope to user scope for consistency
+            uid = user_data.get("id", "")
+            parts = uid.rsplit(":", 1)
+            scope_value = parts[1] if len(parts) == 2 else scope_value
+            _ensure_user_entry(scope_value, user_data)
+        else:
+            continue
+
         remaining = max(0, quota - used)
+        app_name = rule.get("value", "") or rule.get("type", "unknown")
 
         time_limits[scope_value]["limits"][rule_id] = {
-            "app": rule.get("value", "unknown"),
+            "app": app_name,
             "quota": quota,
             "used": used,
             "remaining": remaining,
@@ -504,8 +533,12 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         msp_domain: str,
         access_token: str,
         box_gid: str,
+        config_entry=None,
         include_filters: Optional[list] = None,
         exclude_filters: Optional[list] = None,
+        full_rules_interval: int = DEFAULT_FULL_RULES_INTERVAL,
+        devices_interval: int = DEFAULT_DEVICES_INTERVAL,
+        users_cache_ttl: int = DEFAULT_USERS_CACHE_TTL,
     ) -> None:
         """Initialize the coordinator."""
         self.api = FirewallaMSPClient(session, msp_domain, access_token)
@@ -516,13 +549,21 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         self.include_filters = include_filters or []
         self.exclude_filters = exclude_filters or []
 
-        # Caching: users data rarely changes, refresh every 10 minutes
+        # Configurable polling intervals
+        self._full_rules_interval: int = max(UPDATE_INTERVAL, full_rules_interval)
+        self._devices_interval: int = max(UPDATE_INTERVAL, devices_interval)
+        self._users_cache_ttl: float = float(max(60, users_cache_ttl))
+
+        # Derive poll-cycle counts from intervals
+        # e.g. full_rules_interval=180, base=30 → full rules every 6 polls
+        self._full_rules_every: int = max(1, self._full_rules_interval // UPDATE_INTERVAL)
+        self._devices_every: int = max(1, self._devices_interval // UPDATE_INTERVAL)
+
+        # Caching state
         self._cached_users: list = []
         self._users_last_fetched: float = 0
-        self._USERS_CACHE_TTL: float = 600  # 10 minutes
-
-        # Devices polling: fetch every other cycle (60s) instead of every 30s
         self._cached_devices: list = []
+        self._cached_full_rules: dict[str, Any] = {}
         self._poll_count: int = 0
 
         super().__init__(
@@ -530,6 +571,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            config_entry=config_entry,
         )
 
     async def _async_update_data(self) -> Dict[str, Any]:
@@ -546,12 +588,31 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.error("MSP API authentication failed during data update")
                     raise ConfigEntryAuthFailed("MSP API authentication failed")
 
-            # Fetch rules with filters applied
-            _LOGGER.debug("Fetching rules from MSP API with filters")
-            rules_response = await self._fetch_filtered_rules()
+            self._poll_count += 1
+            import time as _time
+            now = _time.time()
 
-            # Process rules data
-            rules_data = self._process_rules_data(rules_response)
+            # --- Split-polling for rules ---
+            # Full rules: fetched at configurable interval (default every 6 polls = 3 min)
+            # Timelimit-only: fetched every poll (30s) and merged into cached full rules
+            is_full_rules_poll = (
+                self._poll_count % self._full_rules_every == 1
+                or not self._cached_full_rules
+            )
+
+            if is_full_rules_poll:
+                _LOGGER.debug("Full rules refresh (poll %d)", self._poll_count)
+                rules_response = await self._fetch_filtered_rules()
+                rules_data = self._process_rules_data(rules_response)
+                self._cached_full_rules = rules_data
+            else:
+                # Lightweight poll: only timelimit rules (~5.5KB vs ~55KB)
+                _LOGGER.debug("Timelimit-only refresh (poll %d)", self._poll_count)
+                tl_response = await self.api.get_rules("action:timelimit")
+                tl_data = self._process_rules_data(tl_response)
+                # Merge updated timelimit data into cached full rules
+                rules_data = dict(self._cached_full_rules)
+                rules_data.update(tl_data)
 
             # Detect rule changes
             rule_changes = self._detect_rule_changes(rules_data)
@@ -559,18 +620,14 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             # Calculate rule statistics
             rule_stats = self._calculate_rule_statistics(rules_data)
 
-            # Fetch devices every other poll (60s) — activity detection
-            # uses 5-min cooldown so 60s resolution is sufficient.
-            self._poll_count += 1
-            if self._poll_count % 2 == 1 or not self._cached_devices:
+            # Fetch devices at configurable interval (default every 2 polls = 60s)
+            if self._poll_count % self._devices_every == 1 or not self._cached_devices:
                 devices_response = await self.api.get_devices()
                 self._cached_devices = devices_response if isinstance(devices_response, list) else []
             devices_list = self._cached_devices
 
-            # Cache users for 10 minutes — names/affiliations rarely change.
-            import time as _time
-            now = _time.time()
-            if (now - self._users_last_fetched) > self._USERS_CACHE_TTL or not self._cached_users:
+            # Cache users for configurable TTL (default 10 min)
+            if (now - self._users_last_fetched) > self._users_cache_ttl or not self._cached_users:
                 users_response = await self.api.get_users()
                 self._cached_users = users_response if isinstance(users_response, list) else []
                 self._users_last_fetched = now

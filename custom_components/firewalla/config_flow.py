@@ -26,10 +26,16 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BOX_GID,
+    CONF_DEVICES_INTERVAL,
     CONF_EXCLUDE_FILTERS,
+    CONF_FULL_RULES_INTERVAL,
     CONF_INCLUDE_FILTERS,
     CONF_MSP_URL,
+    CONF_USERS_CACHE_TTL,
+    DEFAULT_DEVICES_INTERVAL,
+    DEFAULT_FULL_RULES_INTERVAL,
     DEFAULT_MSP_URL_FORMAT,
+    DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
     ERROR_MESSAGES,
 )
@@ -401,19 +407,63 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 f"Rule access test failed due to unexpected error: {err}"
             ) from err
 
+    async def async_step_reconfigure(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Handle reconfiguration to update MSP credentials."""
+        errors: Dict[str, str] = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
+        if user_input is not None:
+            msp_domain = user_input[CONF_MSP_URL].strip()
+            access_token = user_input[CONF_ACCESS_TOKEN].strip()
+
+            if not msp_domain or not self._validate_msp_url(msp_domain):
+                errors[CONF_MSP_URL] = "invalid_url_format"
+            elif not access_token or len(access_token) < 10:
+                errors[CONF_ACCESS_TOKEN] = "auth_failed"
+            else:
+                # Test the new credentials
+                try:
+                    session = async_get_clientsession(self.hass)
+                    client = FirewallaMSPClient(session, msp_domain, access_token)
+                    if await client.authenticate():
+                        return self.async_update_reload_and_abort(
+                            entry,
+                            data={
+                                **entry.data,
+                                CONF_MSP_URL: msp_domain,
+                                CONF_ACCESS_TOKEN: access_token,
+                            },
+                        )
+                    else:
+                        errors["base"] = "auth_failed"
+                except Exception:
+                    errors["base"] = "connection_failed"
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_MSP_URL,
+                        default=entry.data.get(CONF_MSP_URL, DEFAULT_MSP_URL_FORMAT),
+                    ): str,
+                    vol.Required(CONF_ACCESS_TOKEN): str,
+                }
+            ),
+            errors=errors,
+        )
+
     @staticmethod
     @config_entries.HANDLERS.register(DOMAIN)
     def async_get_options_flow(config_entry):
         """Create the options flow."""
-        return OptionsFlowHandler(config_entry)
+        return OptionsFlowHandler()
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Firewalla integration."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -431,6 +481,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             options_data = {
                 CONF_INCLUDE_FILTERS: include_filters,
                 CONF_EXCLUDE_FILTERS: exclude_filters,
+                CONF_FULL_RULES_INTERVAL: user_input.get(
+                    CONF_FULL_RULES_INTERVAL, DEFAULT_FULL_RULES_INTERVAL
+                ),
+                CONF_DEVICES_INTERVAL: user_input.get(
+                    CONF_DEVICES_INTERVAL, DEFAULT_DEVICES_INTERVAL
+                ),
+                CONF_USERS_CACHE_TTL: user_input.get(
+                    CONF_USERS_CACHE_TTL, DEFAULT_USERS_CACHE_TTL
+                ),
             }
 
             return self.async_create_entry(title="", data=options_data)
@@ -458,6 +517,24 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         default=exclude_filters_str,
                         description={"suggested_value": exclude_filters_str},
                     ): str,
+                    vol.Optional(
+                        CONF_FULL_RULES_INTERVAL,
+                        default=current_options.get(
+                            CONF_FULL_RULES_INTERVAL, DEFAULT_FULL_RULES_INTERVAL
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=900)),
+                    vol.Optional(
+                        CONF_DEVICES_INTERVAL,
+                        default=current_options.get(
+                            CONF_DEVICES_INTERVAL, DEFAULT_DEVICES_INTERVAL
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
+                    vol.Optional(
+                        CONF_USERS_CACHE_TTL,
+                        default=current_options.get(
+                            CONF_USERS_CACHE_TTL, DEFAULT_USERS_CACHE_TTL
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
                 }
             ),
             description_placeholders={

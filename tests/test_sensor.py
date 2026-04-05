@@ -326,7 +326,7 @@ class TestFirewallaTimeLimitSensor:
         assert sensor._attr_unique_id == "firewalla_timelimit_33_r1"
         assert "Harvey" in sensor._attr_name
         assert "Roblox" in sensor._attr_name
-        assert "Time Left" in sensor._attr_name
+        assert sensor._attr_name.endswith("Time")
         assert sensor._attr_has_entity_name is True
 
     def test_native_value_remaining(self):

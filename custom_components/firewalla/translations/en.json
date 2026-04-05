@@ -13,6 +13,18 @@
           "access_token": "Your personal access token from the Firewalla MSP account"
         }
       },
+      "reconfigure": {
+        "title": "Update Firewalla Credentials",
+        "description": "Update your MSP domain or personal access token.",
+        "data": {
+          "msp_url": "MSP Domain",
+          "access_token": "Personal Access Token"
+        },
+        "data_description": {
+          "msp_url": "Your Firewalla MSP domain (e.g., mydomain.firewalla.net)",
+          "access_token": "Your new personal access token"
+        }
+      },
       "box_selection": {
         "title": "Select Firewalla Box",
         "description": "Choose which Firewalla box to manage rules for. The integration will discover all existing rules and create switch entities for each one.",
@@ -40,6 +52,28 @@
       "already_configured": "This Firewalla box is already configured. Each box can only be configured once.",
       "invalid_host": "The provided MSP URL is not valid. Please check the URL format.",
       "auth_failed": "Authentication with the Firewalla MSP API failed. Please check your credentials."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Firewalla Options",
+        "description": "Configure rule filters and API polling intervals. Lower intervals give faster updates but use more API calls.",
+        "data": {
+          "include_filters": "Include Filters",
+          "exclude_filters": "Exclude Filters",
+          "full_rules_interval": "Full Rules Refresh (seconds)",
+          "devices_interval": "Devices Refresh (seconds)",
+          "users_cache_ttl": "Users Cache Duration (seconds)"
+        },
+        "data_description": {
+          "include_filters": "One filter per line. Only rules matching these filters will be shown.",
+          "exclude_filters": "One filter per line. Rules matching these filters will be hidden.",
+          "full_rules_interval": "How often to fetch all rules (30-900s, default 180s). Time limit rules are always fetched every 30s.",
+          "devices_interval": "How often to refresh device data for activity detection (30-600s, default 60s).",
+          "users_cache_ttl": "How long to cache user/group name data (60-3600s, default 600s)."
+        }
+      }
     }
   },
   "entity": {

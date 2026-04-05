@@ -18,9 +18,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BOX_GID,
+    CONF_DEVICES_INTERVAL,
     CONF_EXCLUDE_FILTERS,
+    CONF_FULL_RULES_INTERVAL,
     CONF_INCLUDE_FILTERS,
     CONF_MSP_URL,
+    CONF_USERS_CACHE_TTL,
+    DEFAULT_DEVICES_INTERVAL,
+    DEFAULT_FULL_RULES_INTERVAL,
+    DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
     PLATFORMS,
 )
@@ -64,6 +70,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         include_filters = entry.options.get(CONF_INCLUDE_FILTERS, [])
         exclude_filters = entry.options.get(CONF_EXCLUDE_FILTERS, [])
 
+        # Get polling interval options
+        full_rules_interval = entry.options.get(
+            CONF_FULL_RULES_INTERVAL, DEFAULT_FULL_RULES_INTERVAL
+        )
+        devices_interval = entry.options.get(
+            CONF_DEVICES_INTERVAL, DEFAULT_DEVICES_INTERVAL
+        )
+        users_cache_ttl = entry.options.get(
+            CONF_USERS_CACHE_TTL, DEFAULT_USERS_CACHE_TTL
+        )
+
         # Initialize the data update coordinator for rule discovery
         coordinator = FirewallaDataUpdateCoordinator(
             hass=hass,
@@ -71,8 +88,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             msp_domain=msp_domain,
             access_token=access_token,
             box_gid=box_gid,
+            config_entry=entry,
             include_filters=include_filters,
             exclude_filters=exclude_filters,
+            full_rules_interval=full_rules_interval,
+            devices_interval=devices_interval,
+            users_cache_ttl=users_cache_ttl,
         )
 
         # Test authentication and perform initial rule discovery

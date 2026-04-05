@@ -11,7 +11,13 @@ from custom_components.firewalla.coordinator import (
     FirewallaDataUpdateCoordinator,
     _format_schedule,
 )
-from custom_components.firewalla.const import API_ENDPOINTS
+from custom_components.firewalla.const import (
+    API_ENDPOINTS,
+    DEFAULT_DEVICES_INTERVAL,
+    DEFAULT_FULL_RULES_INTERVAL,
+    DEFAULT_USERS_CACHE_TTL,
+    UPDATE_INTERVAL,
+)
 
 
 @pytest.fixture
@@ -823,3 +829,151 @@ class TestGroupRulesAndTimeLimits:
         ]
         groups = _build_groups(devices, [], {}, previous_downloads={"28": 10000})
         assert groups["28"]["active"] is False  # 5000 bytes < 10240 threshold
+
+
+class TestSplitPolling:
+    """Tests for split-polling: timelimit-only on most polls, full rules at interval."""
+
+    @pytest.fixture
+    def mock_hass(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def coordinator(self, mock_hass, mock_aiohttp_session):
+        return FirewallaDataUpdateCoordinator(
+            hass=mock_hass,
+            session=mock_aiohttp_session,
+            msp_domain="test.firewalla.net",
+            access_token="test_token_123",
+            box_gid="box-123",
+            full_rules_interval=180,  # every 6 polls (180/30)
+            devices_interval=60,  # every 2 polls (60/30)
+            users_cache_ttl=600,
+        )
+
+    def test_configurable_intervals_stored(self, coordinator):
+        """Test that configurable intervals are stored correctly."""
+        assert coordinator._full_rules_interval == 180
+        assert coordinator._devices_interval == 60
+        assert coordinator._users_cache_ttl == 600
+        assert coordinator._full_rules_every == 6
+        assert coordinator._devices_every == 2
+
+    def test_minimum_interval_clamping(self, mock_hass, mock_aiohttp_session):
+        """Test that intervals are clamped to sensible minimums."""
+        coord = FirewallaDataUpdateCoordinator(
+            hass=mock_hass,
+            session=mock_aiohttp_session,
+            msp_domain="test.firewalla.net",
+            access_token="test_token_123",
+            box_gid="box-123",
+            full_rules_interval=10,  # below UPDATE_INTERVAL=30
+            devices_interval=5,
+            users_cache_ttl=10,
+        )
+        assert coord._full_rules_interval == UPDATE_INTERVAL  # clamped to 30
+        assert coord._devices_interval == UPDATE_INTERVAL
+        assert coord._users_cache_ttl == 60  # minimum 60s
+
+    @pytest.mark.asyncio
+    async def test_first_poll_fetches_full_rules(self, coordinator):
+        """Poll 1 should fetch full rules (not timelimit-only)."""
+        coordinator.api._authenticated = True
+        full_rules = [
+            {"id": "r1", "action": "block", "type": "internet", "disabled": False, "paused": False},
+            {"id": "r2", "action": "timelimit", "type": "app", "disabled": False, "paused": False},
+        ]
+        coordinator.api.get_rules = AsyncMock(return_value=full_rules)
+        coordinator.api.get_devices = AsyncMock(return_value=[])
+        coordinator.api.get_users = AsyncMock(return_value=[])
+
+        result = await coordinator._async_update_data()
+
+        # get_rules called once with no query (full fetch)
+        coordinator.api.get_rules.assert_called_once_with()
+        assert len(result["rules"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_second_poll_fetches_timelimit_only(self, coordinator):
+        """Poll 2 should fetch timelimit-only since full_rules_every=6."""
+        coordinator.api._authenticated = True
+        full_rules = [
+            {"id": "r1", "action": "block", "type": "internet", "disabled": False, "paused": False},
+            {"id": "r2", "action": "timelimit", "type": "app", "disabled": False, "paused": False},
+        ]
+        tl_rules = [
+            {"id": "r2", "action": "timelimit", "type": "app", "disabled": False, "paused": False,
+             "timeUsage": {"quota": 60, "used": 30}},
+        ]
+        coordinator.api.get_devices = AsyncMock(return_value=[])
+        coordinator.api.get_users = AsyncMock(return_value=[])
+
+        # First poll — full rules
+        coordinator.api.get_rules = AsyncMock(return_value=full_rules)
+        await coordinator._async_update_data()
+
+        # Second poll — timelimit-only
+        coordinator.api.get_rules = AsyncMock(return_value=tl_rules)
+        result = await coordinator._async_update_data()
+
+        # Should call with timelimit query
+        coordinator.api.get_rules.assert_called_once_with("action:timelimit")
+        # Both rules should be in result (r1 from cache, r2 updated)
+        assert len(result["rules"]) == 2
+        assert "r1" in result["rules"]
+        assert "r2" in result["rules"]
+
+    @pytest.mark.asyncio
+    async def test_seventh_poll_fetches_full_rules_again(self, coordinator):
+        """Poll 7 should trigger a full rules refresh (poll_count % 6 == 1)."""
+        coordinator.api._authenticated = True
+        rules = [{"id": "r1", "action": "block", "type": "internet", "disabled": False, "paused": False}]
+        coordinator.api.get_rules = AsyncMock(return_value=rules)
+        coordinator.api.get_devices = AsyncMock(return_value=[])
+        coordinator.api.get_users = AsyncMock(return_value=[])
+
+        # Simulate 6 polls (first is full, next 5 are timelimit)
+        for _ in range(6):
+            await coordinator._async_update_data()
+
+        # 7th poll
+        coordinator.api.get_rules = AsyncMock(return_value=rules)
+        await coordinator._async_update_data()
+
+        # Should have done a full fetch (no query arg)
+        coordinator.api.get_rules.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_devices_polled_at_configured_interval(self, coordinator):
+        """Devices should be fetched every 2 polls (devices_interval=60)."""
+        coordinator.api._authenticated = True
+        rules = [{"id": "r1", "action": "block", "type": "internet", "disabled": False, "paused": False}]
+        mock_devices = [{"id": "AA:BB", "name": "Phone", "online": True}]
+        coordinator.api.get_rules = AsyncMock(return_value=rules)
+        coordinator.api.get_devices = AsyncMock(return_value=mock_devices)
+        coordinator.api.get_users = AsyncMock(return_value=[{"id": "box:1", "name": "Test"}])
+
+        # Poll 1 — devices fetched (first poll, poll_count=1, 1%2=1)
+        await coordinator._async_update_data()
+        assert coordinator.api.get_devices.call_count == 1
+
+        # Poll 2 — devices NOT fetched (poll_count=2, 2%2=0, cache exists)
+        await coordinator._async_update_data()
+        assert coordinator.api.get_devices.call_count == 1
+
+        # Poll 3 — devices fetched (poll_count=3, 3%2=1)
+        await coordinator._async_update_data()
+        assert coordinator.api.get_devices.call_count == 2
+
+    def test_default_interval_values(self, mock_hass, mock_aiohttp_session):
+        """Test that defaults are used when no explicit intervals are provided."""
+        coord = FirewallaDataUpdateCoordinator(
+            hass=mock_hass,
+            session=mock_aiohttp_session,
+            msp_domain="test.firewalla.net",
+            access_token="test_token_123",
+            box_gid="box-123",
+        )
+        assert coord._full_rules_interval == DEFAULT_FULL_RULES_INTERVAL
+        assert coord._devices_interval == DEFAULT_DEVICES_INTERVAL
+        assert coord._users_cache_ttl == DEFAULT_USERS_CACHE_TTL

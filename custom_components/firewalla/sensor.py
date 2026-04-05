@@ -289,7 +289,7 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
         user_name = user_data["user_name"] if user_data else f"User {user_scope_id}"
         app_name = (limit_data["app"] if limit_data else "unknown").title()
         self._attr_unique_id = f"firewalla_timelimit_{user_scope_id}_{rule_id}"
-        self._attr_name = f"{user_name} {app_name} Time Left"
+        self._attr_name = f"{user_name} {app_name} Time"
         # Attach to the user's affiliated group device
         affiliated_group = user_data.get("affiliated_group", "") if user_data else ""
         group_data = None
@@ -351,7 +351,9 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
             "user_name": user_data["user_name"] if user_data else "",
             "app": limit.get("app", ""),
             "quota_minutes": limit.get("quota", 0),
+            "used_minutes": limit.get("used", 0),
             "remaining_minutes": limit.get("remaining", 0),
+            "usage_percent": round(limit.get("used", 0) / limit["quota"] * 100) if limit.get("quota") else 0,
             "reached": limit.get("reached", False),
             "paused": limit.get("paused", False),
             "schedule": limit.get("schedule_display"),

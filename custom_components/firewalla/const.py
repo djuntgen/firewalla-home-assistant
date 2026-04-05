@@ -10,6 +10,9 @@ CONF_BOX_GID = "box_gid"
 CONF_RULE_FILTERS = "rule_filters"
 CONF_INCLUDE_FILTERS = "include_filters"
 CONF_EXCLUDE_FILTERS = "exclude_filters"
+CONF_FULL_RULES_INTERVAL = "full_rules_interval"
+CONF_DEVICES_INTERVAL = "devices_interval"
+CONF_USERS_CACHE_TTL = "users_cache_ttl"
 
 # Default MSP URL format (user should replace 'mydomain' with their actual domain)
 DEFAULT_MSP_URL_FORMAT = "mydomain.firewalla.net"
@@ -72,10 +75,16 @@ RULE_QUERY_PARAMS = {
 
 # Timeouts and intervals
 API_TIMEOUT = 30  # seconds
-UPDATE_INTERVAL = 30  # seconds minimum for API rate limiting
+UPDATE_INTERVAL = 30  # seconds — base coordinator poll cycle
 RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_FACTOR = 2
 RETRY_DELAYS = [1, 2, 4, 8]  # Exponential backoff delays in seconds
+
+# Split-polling defaults (configurable via options flow)
+DEFAULT_FULL_RULES_INTERVAL = 180  # seconds — full rules refresh (default 3 min)
+DEFAULT_DEVICES_INTERVAL = 60  # seconds — device list refresh (default 1 min)
+DEFAULT_USERS_CACHE_TTL = 600  # seconds — user data cache (default 10 min)
+# Timelimit-only rules are fetched every base poll (30s) between full refreshes
 
 # Authentication
 AUTH_HEADER_FORMAT = "Token {token}"

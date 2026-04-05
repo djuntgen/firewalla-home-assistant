@@ -1,17 +1,19 @@
 # Firewalla Parental Control Dashboard
 #
 # Installation:
-# 1. Install the "auto-entities" custom card from HACS
-#    (HACS > Frontend > Search "auto-entities" > Install)
+# 1. Install from HACS: "auto-entities" and "mushroom" custom cards
 # 2. Go to Settings > Dashboards > Add Dashboard
 # 3. Choose "New dashboard from scratch", name it "Firewalla"
 # 4. Open the dashboard, click the 3 dots menu > Edit Dashboard
 # 5. Click the 3 dots menu again > Raw Configuration Editor
 # 6. Paste this entire file and save
 #
-# This dashboard auto-discovers all Firewalla user groups and their
-# entities. When you add a new child on Firewalla, their card appears
-# automatically after the next coordinator poll (~30 seconds).
+# Each kid gets their own column with activity, internet toggle,
+# time limits (progress bars), and content block switches.
+# New apps/rules auto-discover within each kid's column.
+#
+# To add a new kid: duplicate a section and change the name/slug.
+# Entity ID pattern: firewalla_group_{slug}_{slug}_{entity}
 
 title: Firewalla Parental Controls
 views:
@@ -21,58 +23,122 @@ views:
     type: sections
     max_columns: 3
     sections:
+      # ── Matt ──────────────────────────────────────────────
       - type: grid
+        title: Matt
         cards:
-          # ----------------------------------------------------------
-          # Activity status — one row per child, auto-discovered
-          # ----------------------------------------------------------
           - type: custom:auto-entities
             card:
               type: entities
-              title: Activity
             filter:
               include:
-                - entity_id: "binary_sensor.firewalla_user_*_active"
+                - entity_id: "/binary_sensor\\.firewalla_group_matt_matt_active/"
                   options:
                     secondary_info: last-changed
-            sort:
-              method: friendly_name
+                - entity_id: "/switch\\.firewalla_group_matt_matt_internet_access/"
 
-          # ----------------------------------------------------------
-          # Internet access toggles — one row per child
-          # ----------------------------------------------------------
-          - type: custom:auto-entities
-            card:
-              type: entities
-              title: Internet Access
-            filter:
-              include:
-                - entity_id: "switch.firewalla_group_*_internet"
-            sort:
-              method: friendly_name
-
-          # ----------------------------------------------------------
-          # Time limits — remaining minutes per app per child
-          # ----------------------------------------------------------
           - type: custom:auto-entities
             card:
               type: entities
               title: Time Limits
             filter:
               include:
-                - entity_id: "sensor.firewalla_timelimit_*"
+                - entity_id: "/sensor\\.firewalla_group_matt_.*_time/"
+                  options:
+                    type: custom:mushroom-entity-row
+                    fill_container: true
             sort:
               method: friendly_name
 
-          # ----------------------------------------------------------
-          # Content block rules — category/app blocks per child
-          # ----------------------------------------------------------
           - type: custom:auto-entities
             card:
               type: entities
-              title: Content Blocks
+              title: Blocks
             filter:
               include:
-                - entity_id: "switch.firewalla_group_*_rule_*"
+                - entity_id: "/switch\\.firewalla_group_matt_matt_.*_block/"
+              exclude:
+                - entity_id: "/.*_doh_block/"
+                - entity_id: "switch.firewalla_group_matt_matt_block$"
+            sort:
+              method: friendly_name
+
+      # ── Harvey ────────────────────────────────────────────
+      - type: grid
+        title: Harvey
+        cards:
+          - type: custom:auto-entities
+            card:
+              type: entities
+            filter:
+              include:
+                - entity_id: "/binary_sensor\\.firewalla_group_harvey_harvey_active/"
+                  options:
+                    secondary_info: last-changed
+                - entity_id: "/switch\\.firewalla_group_harvey_harvey_internet_access/"
+
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Time Limits
+            filter:
+              include:
+                - entity_id: "/sensor\\.firewalla_group_harvey_.*_time/"
+                  options:
+                    type: custom:mushroom-entity-row
+                    fill_container: true
+            sort:
+              method: friendly_name
+
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Blocks
+            filter:
+              include:
+                - entity_id: "/switch\\.firewalla_group_harvey_harvey_.*_block/"
+              exclude:
+                - entity_id: "/.*_doh_block/"
+                - entity_id: "switch.firewalla_group_harvey_harvey_block$"
+            sort:
+              method: friendly_name
+
+      # ── Elaine ────────────────────────────────────────────
+      - type: grid
+        title: Elaine
+        cards:
+          - type: custom:auto-entities
+            card:
+              type: entities
+            filter:
+              include:
+                - entity_id: "/binary_sensor\\.firewalla_group_elaine_elaine_active/"
+                  options:
+                    secondary_info: last-changed
+                - entity_id: "/switch\\.firewalla_group_elaine_elaine_internet_access/"
+
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Time Limits
+            filter:
+              include:
+                - entity_id: "/sensor\\.firewalla_group_elaine_.*_time/"
+                  options:
+                    type: custom:mushroom-entity-row
+                    fill_container: true
+            sort:
+              method: friendly_name
+
+          - type: custom:auto-entities
+            card:
+              type: entities
+              title: Blocks
+            filter:
+              include:
+                - entity_id: "/switch\\.firewalla_group_elaine_elaine_.*_block/"
+              exclude:
+                - entity_id: "/.*_doh_block/"
+                - entity_id: "switch.firewalla_group_elaine_elaine_block$"
             sort:
               method: friendly_name
