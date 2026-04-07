@@ -62,30 +62,13 @@ def _build_user_section(name: str) -> dict:
                 "color": "red",
             },
             {
-                "type": "custom:apexcharts-card",
-                "header": {"title": "Bandwidth", "show": True},
-                "graph_span": "24h",
-                "span": {"end": "now"},
-                "all_series_config": {"stroke_width": 2, "fill_raw": "last"},
-                "series": [
-                    {
-                        "entity": f"sensor.{slug}_download",
-                        "name": "Download",
-                        "color": "#2196F3",
-                        "unit": " GB",
-                    },
-                    {
-                        "entity": f"sensor.{slug}_upload",
-                        "name": "Upload",
-                        "color": "#4CAF50",
-                        "unit": " GB",
-                    },
+                "type": "history-graph",
+                "title": "Bandwidth (8h)",
+                "hours_to_show": 8,
+                "entities": [
+                    {"entity": f"sensor.{slug}_download", "name": "Download"},
+                    {"entity": f"sensor.{slug}_upload", "name": "Upload"},
                 ],
-                "apex_config": {
-                    "chart": {"toolbar": {"show": True}},
-                    "xaxis": {"labels": {"datetimeFormatter": {"hour": "HH:mm"}}},
-                    "tooltip": {"x": {"format": "MMM dd HH:mm"}},
-                },
             },
             {
                 "type": "custom:auto-entities",
