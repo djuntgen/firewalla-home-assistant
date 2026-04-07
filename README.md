@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="custom_components/firewalla/icon.svg" alt="Firewalla for Home Assistant" width="200">
+  <img src="custom_components/firewalla/icon.png" alt="Firewalla for Home Assistant" width="200">
 </p>
 
 <h1 align="center">Firewalla Home Assistant Integration</h1>
