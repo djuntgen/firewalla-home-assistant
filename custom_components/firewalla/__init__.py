@@ -77,7 +77,7 @@ def _build_user_section(name: str) -> dict:
                     "include": [
                         {
                             "entity_id": f"sensor.{slug}_*",
-                            "attributes": {"unit_of_measurement": "min"},
+                            "attributes": {"quota_minutes": ">= 0"},
                             "options": {
                                 "type": "custom:entity-progress-card",
                                 "attribute": "usage_percent",
