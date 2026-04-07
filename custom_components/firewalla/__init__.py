@@ -48,25 +48,34 @@ def _build_user_section(name: str) -> dict:
         "title": name.strip(),
         "cards": [
             {
-                "type": "custom:auto-entities",
-                "card": {"type": "entities"},
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": f"binary_sensor.firewalla_group_{slug}_{slug}_active",
-                            "options": {"secondary_info": "last-changed"},
-                        },
-                        {"entity_id": f"switch.*{slug}*internet*"},
-                    ]
-                },
+                "type": "tile",
+                "entity": f"binary_sensor.firewalla_group_{slug}_{slug}_active",
+                "name": "Activity",
+                "vertical": True,
+                "color": "green",
+            },
+            {
+                "type": "tile",
+                "entity": f"switch.firewalla_group_{slug}_{slug}_internet_access",
+                "name": "Internet",
+                "vertical": True,
+                "color": "red",
             },
             {
                 "type": "custom:auto-entities",
-                "card": {"type": "entities", "title": "Bandwidth (24h)"},
+                "card": {
+                    "type": "glance",
+                    "title": "Bandwidth (24h)",
+                    "show_state": True,
+                },
                 "filter": {
                     "include": [
-                        {"entity_id": f"sensor.firewalla_group_{slug}_{slug}_download"},
-                        {"entity_id": f"sensor.firewalla_group_{slug}_{slug}_upload"},
+                        {
+                            "entity_id": (
+                                f"sensor.firewalla_group_{slug}_{slug}_download"
+                            )
+                        },
+                        {"entity_id": (f"sensor.firewalla_group_{slug}_{slug}_upload")},
                     ]
                 },
                 "show_empty": False,
@@ -81,10 +90,11 @@ def _build_user_section(name: str) -> dict:
                             "options": {
                                 "type": "custom:entity-progress-card",
                                 "attribute": "usage_percent",
+                                "unit": "%",
                                 "severity": [
-                                    {"from": 0, "to": 50, "color": "green"},
-                                    {"from": 50, "to": 80, "color": "orange"},
-                                    {"from": 80, "to": 100, "color": "red"},
+                                    {"from": 0, "to": 50, "color": "#4CAF50"},
+                                    {"from": 50, "to": 80, "color": "#FFC107"},
+                                    {"from": 80, "to": 100, "color": "#F44336"},
                                 ],
                             },
                         }
@@ -148,7 +158,11 @@ async def _async_generate_dashboard(hass: HomeAssistant, dashboard_users: str) -
                         "type": "entity",
                         "entity": "button.firewalla_refresh",
                         "tap_action": {"action": "toggle"},
-                    }
+                    },
+                    {
+                        "type": "entity",
+                        "entity": "sensor.firewalla_rules_summary",
+                    },
                 ],
                 "sections": [_build_user_section(name) for name in users],
             }
