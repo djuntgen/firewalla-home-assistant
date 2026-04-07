@@ -88,7 +88,20 @@ def _build_user_section(name: str) -> dict:
                                     {"from": 80, "to": 100, "color": "#F44336"},
                                 ],
                             },
-                        }
+                        },
+                        {
+                            "entity_id": f"sensor.firewalla_group_{slug}_{slug}_*_time",
+                            "options": {
+                                "type": "custom:entity-progress-card",
+                                "attribute": "usage_percent",
+                                "unit": "%",
+                                "severity": [
+                                    {"from": 0, "to": 50, "color": "#4CAF50"},
+                                    {"from": 50, "to": 80, "color": "#FFC107"},
+                                    {"from": 80, "to": 100, "color": "#F44336"},
+                                ],
+                            },
+                        },
                     ]
                 },
                 "sort": {"method": "friendly_name"},
