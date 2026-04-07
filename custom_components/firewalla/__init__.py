@@ -76,7 +76,18 @@ def _build_user_section(name: str) -> dict:
                 "card": {"type": "entities", "title": "Time Limits"},
                 "filter": {
                     "include": [
-                        {"entity_id": f"sensor.firewalla_group_{slug}_{slug}_*_time"}
+                        {
+                            "entity_id": f"sensor.firewalla_group_{slug}_{slug}_*_time",
+                            "options": {
+                                "type": "custom:entity-progress-card",
+                                "attribute": "usage_percent",
+                                "severity": [
+                                    {"from": 0, "to": 50, "color": "green"},
+                                    {"from": 50, "to": 80, "color": "orange"},
+                                    {"from": 80, "to": 100, "color": "red"},
+                                ],
+                            },
+                        }
                     ]
                 },
                 "sort": {"method": "friendly_name"},
