@@ -195,24 +195,48 @@ Both are detected and surfaced as time limit sensors with `usage_percent` (cappe
 
 ## Usage
 
-### Dashboard
+### Parental Control Dashboard
+
+The integration can auto-generate a per-user parental control dashboard. Each user gets their own column with activity, internet, bandwidth, time limits, devices, and blocks — all auto-discovered.
 
 #### Prerequisites
 
-Install from HACS:
-- **auto-entities** — auto-discovers entities by pattern
-- **entity-progress-card** — color-coded progress bars for time limits
+1. Install **auto-entities** from HACS (required for dynamic entity discovery)
+2. Create an empty dashboard: **Settings > Dashboards > Add Dashboard**, name it `dashboard-firewalla`, choose "New dashboard from scratch"
 
-#### Layout
+#### Setup
 
-The included dashboard template (`custom_components/firewalla/dashboard/firewalla_parental.yaml`) uses a per-user column layout:
+1. Go to **Settings > Integrations > Firewalla > Configure**
+2. In the **Dashboard Users** field, enter your Firewalla user names, comma-separated:
+   ```
+   Matt, Harvey, Elaine
+   ```
+   Names must match your Firewalla group names exactly (case-sensitive).
+3. Click **Submit** — the integration generates the dashboard automatically
 
-1. **Activity tile** — online/offline with traffic detection
-2. **Internet tile** — toggle switch
-3. **Bandwidth (24h)** — download and upload in GB
-4. **Time limits** — entity-progress-card with usage percentage (green/orange/red)
-5. **Devices** — per-device online/offline with last-changed
-6. **Blocks** — content block toggles
+The dashboard is regenerated each time the integration reloads (e.g., after changing options or restarting HA). To add or remove users, just update the comma-separated list and save.
+
+#### What's generated
+
+Each user column includes:
+
+| Section | What it shows |
+|---------|--------------|
+| **Activity** | Online/offline binary sensor with last-changed timestamp |
+| **Internet** | Internet block switch (Block On / Block Off, matching Firewalla app) |
+| **Bandwidth (24h)** | Download and upload sensors in GB |
+| **Time Limits** | App and internet time limits with remaining minutes |
+| **Devices** | Per-device online/offline sensors with last-changed |
+| **Blocks** | All block rule switches (apps, categories, content) |
+
+All entities within each section are auto-discovered using `auto-entities` glob patterns. New rules, time limits, and devices appear automatically without editing the dashboard.
+
+#### Notes
+
+- The dashboard URL path must be `dashboard-firewalla` — create this dashboard in HA before configuring users
+- If the dashboard doesn't exist yet, the integration logs a warning and skips generation
+- Leave the **Dashboard Users** field empty to skip dashboard generation entirely
+- You can still edit the generated dashboard manually in the HA UI after it's created
 
 ### Automation Examples
 

@@ -60,6 +60,7 @@
         "title": "Firewalla Options",
         "description": "Configure rule filters and API polling intervals. Lower intervals mean faster updates but more API calls. If you hit rate limits (HTTP 429), increase these values.",
         "data": {
+          "dashboard_users": "Dashboard Users",
           "include_filters": "Include Filters",
           "exclude_filters": "Exclude Filters",
           "base_poll_interval": "Base Poll Interval (seconds)",
@@ -68,6 +69,7 @@
           "users_cache_ttl": "Users Cache Duration (seconds)"
         },
         "data_description": {
+          "dashboard_users": "Comma-separated Firewalla user names for the parental control dashboard (e.g., Matt, Harvey, Elaine). Names must match your Firewalla group names exactly. Leave empty to skip dashboard generation.",
           "include_filters": "One filter per line. Only rules matching these filters will be shown (OR logic).",
           "exclude_filters": "One filter per line. Rules matching these filters will be hidden.",
           "base_poll_interval": "How often to call the Firewalla API (30-300s, default 45s). Each poll fetches time limit data (~5 KB). All other data types refresh at their own intervals below. A manual Refresh button is also available on the Firewalla device page.",

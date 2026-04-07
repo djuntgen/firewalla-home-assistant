@@ -19,6 +19,7 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BASE_POLL_INTERVAL,
     CONF_BOX_GID,
+    CONF_DASHBOARD_USERS,
     CONF_DEVICES_INTERVAL,
     CONF_EXCLUDE_FILTERS,
     CONF_FULL_RULES_INTERVAL,
@@ -35,6 +36,132 @@ from .const import (
 from .coordinator import FirewallaDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+DASHBOARD_URL_PATH = "dashboard-firewalla"
+
+
+def _build_user_section(name: str) -> dict:
+    """Build a dashboard section for a single Firewalla user."""
+    slug = name.strip().lower().replace(" ", "_")
+    return {
+        "type": "grid",
+        "title": name.strip(),
+        "cards": [
+            {
+                "type": "custom:auto-entities",
+                "card": {"type": "entities"},
+                "filter": {
+                    "include": [
+                        {
+                            "entity_id": f"binary_sensor.firewalla_group_{slug}_{slug}_active",
+                            "options": {"secondary_info": "last-changed"},
+                        },
+                        {"entity_id": f"switch.*{slug}*internet*"},
+                    ]
+                },
+            },
+            {
+                "type": "custom:auto-entities",
+                "card": {"type": "entities", "title": "Bandwidth (24h)"},
+                "filter": {
+                    "include": [
+                        {"entity_id": f"sensor.firewalla_group_{slug}_{slug}_download"},
+                        {"entity_id": f"sensor.firewalla_group_{slug}_{slug}_upload"},
+                    ]
+                },
+                "show_empty": False,
+            },
+            {
+                "type": "custom:auto-entities",
+                "card": {"type": "entities", "title": "Time Limits"},
+                "filter": {
+                    "include": [
+                        {"entity_id": f"sensor.firewalla_group_{slug}_{slug}_*_time"}
+                    ]
+                },
+                "sort": {"method": "friendly_name"},
+                "show_empty": False,
+            },
+            {
+                "type": "custom:auto-entities",
+                "card": {"type": "entities", "title": "Devices"},
+                "filter": {
+                    "include": [
+                        {
+                            "entity_id": f"binary_sensor.firewalla_group_{slug}_{slug}_*",
+                            "not": {"entity_id": f"*_{slug}_active"},
+                            "options": {"secondary_info": "last-changed"},
+                        }
+                    ]
+                },
+                "sort": {"method": "friendly_name"},
+                "show_empty": False,
+            },
+            {
+                "type": "custom:auto-entities",
+                "card": {"type": "entities", "title": "Blocks"},
+                "filter": {
+                    "include": [
+                        {"entity_id": f"switch.firewalla_group_{slug}_{slug}_*_block"},
+                        {"entity_id": f"switch.{slug}_block_*"},
+                    ],
+                    "exclude": [
+                        {"entity_id": "*_doh_block*"},
+                        {"state": "unavailable"},
+                    ],
+                },
+                "sort": {"method": "friendly_name"},
+                "show_empty": False,
+            },
+        ],
+    }
+
+
+async def _async_generate_dashboard(hass: HomeAssistant, dashboard_users: str) -> None:
+    """Generate and push the parental control dashboard for configured users."""
+    users = [u.strip() for u in dashboard_users.split(",") if u.strip()]
+    if not users:
+        return
+
+    config = {
+        "title": "Firewalla Parental Controls",
+        "views": [
+            {
+                "title": "Users",
+                "path": "users",
+                "icon": "mdi:shield-account",
+                "type": "sections",
+                "max_columns": min(len(users), 4),
+                "badges": [
+                    {
+                        "type": "entity",
+                        "entity": "button.firewalla_refresh",
+                        "tap_action": {"action": "toggle"},
+                    }
+                ],
+                "sections": [_build_user_section(name) for name in users],
+            }
+        ],
+    }
+
+    try:
+        await hass.services.async_call(
+            "lovelace",
+            "save_config",
+            {"url_path": DASHBOARD_URL_PATH, "config": config},
+            blocking=True,
+        )
+        _LOGGER.info(
+            "Generated parental control dashboard for %d users: %s",
+            len(users),
+            ", ".join(users),
+        )
+    except Exception as err:
+        _LOGGER.warning(
+            "Could not generate dashboard (create '%s' dashboard manually first): %s",
+            DASHBOARD_URL_PATH,
+            err,
+        )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -129,6 +256,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Set up options update listener
         entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
+        # Generate parental control dashboard if users are configured
+        dashboard_users = entry.options.get(CONF_DASHBOARD_USERS, "")
+        if dashboard_users:
+            await _async_generate_dashboard(hass, dashboard_users)
 
         _LOGGER.info("Successfully set up Firewalla rule management platforms")
 

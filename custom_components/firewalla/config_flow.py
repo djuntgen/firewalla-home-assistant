@@ -28,6 +28,7 @@ from .const import (
     CONF_BOX_GID,
     CONF_DEVICES_INTERVAL,
     CONF_BASE_POLL_INTERVAL,
+    CONF_DASHBOARD_USERS,
     CONF_EXCLUDE_FILTERS,
     CONF_FULL_RULES_INTERVAL,
     CONF_INCLUDE_FILTERS,
@@ -481,6 +482,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
 
             options_data = {
+                CONF_DASHBOARD_USERS: user_input.get(CONF_DASHBOARD_USERS, ""),
                 CONF_INCLUDE_FILTERS: include_filters,
                 CONF_EXCLUDE_FILTERS: exclude_filters,
                 CONF_BASE_POLL_INTERVAL: user_input.get(
@@ -508,10 +510,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         include_filters_str = "\n".join(include_filters) if include_filters else ""
         exclude_filters_str = "\n".join(exclude_filters) if exclude_filters else ""
 
+        dashboard_users = current_options.get(CONF_DASHBOARD_USERS, "")
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Optional(
+                        CONF_DASHBOARD_USERS,
+                        default=dashboard_users,
+                        description={"suggested_value": dashboard_users},
+                    ): str,
                     vol.Optional(
                         CONF_INCLUDE_FILTERS,
                         default=include_filters_str,
