@@ -17,6 +17,7 @@ from .const import (
     API_TIMEOUT,
     AUTH_HEADER_FORMAT,
     CONTENT_TYPE,
+    DEFAULT_BASE_POLL_INTERVAL,
     DEFAULT_DEVICES_INTERVAL,
     DEFAULT_FULL_RULES_INTERVAL,
     DEFAULT_USERS_CACHE_TTL,
@@ -544,6 +545,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         config_entry=None,
         include_filters: Optional[list] = None,
         exclude_filters: Optional[list] = None,
+        base_poll_interval: int = DEFAULT_BASE_POLL_INTERVAL,
         full_rules_interval: int = DEFAULT_FULL_RULES_INTERVAL,
         devices_interval: int = DEFAULT_DEVICES_INTERVAL,
         users_cache_ttl: int = DEFAULT_USERS_CACHE_TTL,
@@ -558,14 +560,15 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         self.exclude_filters = exclude_filters or []
 
         # Configurable polling intervals
-        self._full_rules_interval: int = max(UPDATE_INTERVAL, full_rules_interval)
-        self._devices_interval: int = max(UPDATE_INTERVAL, devices_interval)
+        self._base_poll_interval: int = max(30, base_poll_interval)
+        self._full_rules_interval: int = max(self._base_poll_interval, full_rules_interval)
+        self._devices_interval: int = max(self._base_poll_interval, devices_interval)
         self._users_cache_ttl: float = float(max(60, users_cache_ttl))
 
         # Derive poll-cycle counts from intervals
-        # e.g. full_rules_interval=180, base=30 → full rules every 6 polls
-        self._full_rules_every: int = max(1, self._full_rules_interval // UPDATE_INTERVAL)
-        self._devices_every: int = max(1, self._devices_interval // UPDATE_INTERVAL)
+        # e.g. full_rules_interval=180, base=60 → full rules every 3 polls
+        self._full_rules_every: int = max(1, self._full_rules_interval // self._base_poll_interval)
+        self._devices_every: int = max(1, self._devices_interval // self._base_poll_interval)
 
         # Caching state
         self._cached_users: list = []
@@ -578,7 +581,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=UPDATE_INTERVAL),
+            update_interval=timedelta(seconds=self._base_poll_interval),
             config_entry=config_entry,
         )
 

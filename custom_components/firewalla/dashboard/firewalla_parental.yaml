@@ -27,6 +27,11 @@ views:
     icon: mdi:shield-account
     type: sections
     max_columns: 3
+    badges:
+      - type: entity
+        entity: button.firewalla_box_refresh
+        tap_action:
+          action: toggle
     sections:
       # ── User_A ─────────────────────────────────────────────
       # Replace "User_A" / "user_a" with your first group name

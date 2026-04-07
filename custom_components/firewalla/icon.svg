@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <polygon points="256,48 48,240 112,240 112,464 400,464 400,240 464,240" fill="#03A9F4" />
+
+  <path d="M256,144 L160,176 V288 C160,368 256,432 256,432 C256,432 352,368 352,288 V176 L256,144 Z" fill="#F44336" />
+
+  <line x1="160" y1="220" x2="352" y2="220" stroke="#B71C1C" stroke-width="8" />
+  <line x1="160" y1="280" x2="352" y2="280" stroke="#B71C1C" stroke-width="8" />
+  <line x1="256" y1="220" x2="256" y2="155" stroke="#B71C1C" stroke-width="8" />
+  <line x1="208" y1="280" x2="208" y2="220" stroke="#B71C1C" stroke-width="8" />
+  <line x1="304" y1="280" x2="304" y2="220" stroke="#B71C1C" stroke-width="8" />
+  <line x1="256" y1="340" x2="256" y2="280" stroke="#B71C1C" stroke-width="8" />
+</svg>

@@ -1,334 +1,316 @@
-# Firewalla Home Assistant Integration
+<p align="center">
+  <img src="custom_components/firewalla/icon.svg" alt="Firewalla for Home Assistant" width="200">
+</p>
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![GitHub release](https://img.shields.io/github/release/djuntgen/firewalla-home-assistant.svg)](https://github.com/djuntgen/firewalla-home-assistant/releases)
-[![License](https://img.shields.io/github/license/djuntgen/firewalla-home-assistant.svg)](LICENSE)
+<h1 align="center">Firewalla for Home Assistant</h1>
 
-A Home Assistant integration for Firewalla firewall devices that provides **rule management and control** through the MSP (Managed Service Provider) API. Automatically discover your existing Firewalla rules and control them (pause/unpause) directly from Home Assistant.
+<p align="center">
+  <a href="https://github.com/custom-components/hacs"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS"></a>
+  <a href="https://github.com/djuntgen/firewalla-home-assistant/releases"><img src="https://img.shields.io/github/release/djuntgen/firewalla-home-assistant.svg" alt="GitHub release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/djuntgen/firewalla-home-assistant.svg" alt="License"></a>
+</p>
+
+A Home Assistant custom integration for managing Firewalla firewall rules, groups, and parental controls via the MSP (Managed Service Provider) API v2.
 
 ## Features
 
-### 🛡️ Automatic Rule Discovery
-- **Rule Detection**: Automatically discovers all existing Firewalla rules
-- **Switch Entities**: Creates a switch entity for each controllable rule
-- **Dynamic Updates**: Automatically adds new rules and removes deleted ones
-- **Real-time Sync**: Keeps Home Assistant entities synchronized with Firewalla
+- **Rule switches** — each Firewalla rule becomes an HA switch (toggle pause/resume)
+- **Group internet switches** — per-group internet control, derived from API data
+- **Per-group rule switches** — category/app block rules per group
+- **Time limit sensors** — per-user app and internet time limits with remaining minutes, quota, usage percentage
+- **Per-user bandwidth sensors** — 24h download/upload in GB per user group
+- **Per-device online sensors** — online/offline status with IP, MAC vendor, network, last seen
+- **User activity sensors** — binary sensors detecting active internet usage per user
+- **Rules summary sensor** — overview of total/active/paused rules with breakdown by type
+- **Manual refresh button** — on-demand full data refresh from the Firewalla device page
+- **Dynamic entity lifecycle** — entities auto-add/remove when Firewalla rules, groups, or devices change
+- **Optimistic state updates** — UI reflects toggles immediately, confirmed on next poll
+- **Split-polling** — time-sensitive data polled frequently; bulk data less often
+- **Configurable polling intervals** — tune API call frequency via integration options
+- **Dynamic naming** — all entity names derived from API data, no hardcoded strings
+- **Reconfigure flow** — update MSP credentials without deleting the integration
 
-### 🎛️ Rule Control
-- **Pause/Unpause Rules**: Turn switches ON to activate rules, OFF to pause them
-- **Rule Preservation**: Paused rules retain all configuration for easy re-activation
-- **Instant Control**: Immediate rule state changes through Home Assistant
-- **Bulk Management**: Control multiple rules through automations and scripts
+## Prerequisites
 
-### 📊 Rich Rule Information
-- **Rule Metadata**: View rule type, target, description, priority, and schedule
-- **Rule Statistics**: Monitor total, active, and paused rule counts
-- **Rule History**: Track rule creation and modification timestamps
-- **Integration Health**: Monitor API connectivity and rule synchronization status
-
-### 🔧 Advanced Features
-- **Rule Filtering**: Configure which rules appear in Home Assistant using Firewalla's query syntax
-- **MSP API Integration**: Full integration with Firewalla's MSP API v2
-- **Automatic Discovery**: Discover and select from available Firewalla boxes
-- **Error Recovery**: Robust error handling with automatic retry logic
-- **Rate Limiting**: Respects API rate limits with intelligent caching and batching
+- Firewalla device (Gold, Gold SE, Purple, Purple SE, Blue, Red)
+- Firewalla MSP account with API access enabled
+- Personal Access Token from MSP settings
+- Home Assistant 2026.4+
 
 ## Installation
 
 ### HACS (Recommended)
 
 1. Open HACS in Home Assistant
-2. Go to "Integrations"
-3. Click the three dots in the top right corner
-4. Select "Custom repositories"
-5. Add this repository URL: `https://github.com/djuntgen/firewalla-home-assistant`
-6. Select "Integration" as the category
-7. Click "Add"
-8. Find "Firewalla" in the integration list and install it
-9. Restart Home Assistant
+2. Go to **Integrations** > three-dot menu > **Custom repositories**
+3. Add this repository URL: `https://github.com/djuntgen/firewalla-home-assistant`
+4. Select **Integration** as the category and click **Add**
+5. Find "Firewalla" in the integration list and install it
+6. Restart Home Assistant
 
-### Manual Installation
+### Manual
 
-1. Download the latest release from the [releases page](https://github.com/djuntgen/firewalla-home-assistant/releases)
-2. Extract the `custom_components/firewalla` folder to your Home Assistant `custom_components` directory
-3. Restart Home Assistant
+1. Copy the `custom_components/firewalla/` directory to your Home Assistant `config/custom_components/` directory
+2. Restart Home Assistant
 
 ## Configuration
 
-### Prerequisites
+### Initial Setup
 
-1. **Firewalla MSP Account**: You need access to Firewalla's MSP (Managed Service Provider) API
-2. **Personal Access Token**: Generate a personal access token from your MSP account settings
-3. **MSP Domain**: Your MSP domain (e.g., `mydomain.firewalla.net` or `https://mydomain.firewalla.net`)
-4. **Existing Rules**: The integration manages existing Firewalla rules (it doesn't create new ones)
+1. Go to **Settings > Devices & Services > Add Integration**
+2. Search for "Firewalla"
+3. Enter your MSP domain (e.g., `mydomain.firewalla.net`)
+4. Enter your Personal Access Token
+5. Select your Firewalla box (auto-selected if you only have one)
 
-### Setup Steps
+### Updating Credentials
 
-1. Go to **Configuration** → **Integrations** in Home Assistant
-2. Click **Add Integration** and search for "Firewalla"
-3. Enter your MSP credentials:
-   - **MSP Domain**: Your Firewalla MSP domain (e.g., `mydomain.firewalla.net` or `https://mydomain.firewalla.net`)
-   - **Personal Access Token**: Your MSP API access token
-4. Select your Firewalla box (if you have multiple boxes)
-5. (Optional) Configure rule filters to show only specific rules
-6. Complete the setup and wait for rule discovery
+Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure** to update your MSP domain or access token without deleting the integration. Useful when tokens expire.
 
-### Configuration Options
+### Polling Intervals (Settings > Integrations > Firewalla > Configure)
 
-| Field | Description | Required | Example |
-|-------|-------------|----------|---------|
-| MSP Domain | Firewalla MSP domain | Yes | `mydomain.firewalla.net` or `https://mydomain.firewalla.net` |
-| Personal Access Token | Your MSP API access token | Yes | `msp_token_abc123...` |
-| Firewalla Box | Select from discovered boxes | Yes | Auto-selected if only one |
+The integration polls the Firewalla API at configurable intervals. Lower values give faster updates but consume more of your API rate limit budget.
 
-## Rule Filtering
+| Option | Default | Range | What it controls |
+|--------|---------|-------|------------------|
+| Base Poll Interval | 45s | 30-300s | How often the integration calls the Firewalla API. Each poll fetches **time limit data** (~5 KB) — minutes remaining, usage percentage. All other data types refresh at their own intervals below. A manual **Refresh** button is also available on the Firewalla device page. |
+| Full Rules Refresh | 300s | 60-900s | How often to fetch **all firewall rules** — block/allow status, hit counts, schedules (~55 KB). Between full refreshes, only lightweight time limit data is fetched. |
+| Devices Refresh | 600s | 60-600s | How often to fetch **device data** — online/offline status, IP addresses, bandwidth usage, activity detection (~45 KB). Higher values reduce API calls but delay device status updates. |
+| Users Cache Duration | 1800s | 60-3600s | How long to cache **user and group names** (~2 KB). Names rarely change, so this can be set high. |
 
-### Overview
-Configure which Firewalla rules appear in Home Assistant using powerful filtering options. This allows you to show only the rules you need, reducing clutter and improving organization.
+**API calls per minute at defaults:** ~1.7 (well within Firewalla's rate limits).
 
-### Configuration
-1. Go to **Configuration** → **Integrations**
-2. Find your Firewalla integration and click **Configure**
-3. Add include/exclude filters using Firewalla's query syntax
-4. Save and the integration will reload with filtered rules
+### Rule Filters (Settings > Integrations > Firewalla > Configure)
 
-### Filter Examples
+| Option | Description |
+|--------|-------------|
+| Include Filters | Only show rules matching these filters (one per line, OR logic). **Each filter adds an extra API call per full rules refresh.** |
+| Exclude Filters | Hide rules matching these filters (one per line). **Each filter adds an extra API call per full rules refresh.** |
 
-#### Include Filters (show only these)
-- `status:active` - Show only active rules (71 of 83 rules)
-- `target.type:app` - Show only app rules (13 rules: YouTube, Facebook, TikTok)
-- `action:block` - Show only blocking rules (60 rules)
-- `scope.value:"FC:34:97:A5:9F:91"` - Show rules for specific device (8 rules)
+Filters use Firewalla's query syntax:
 
-#### Exclude Filters (hide these)
-- `-status:paused` - Hide paused rules (show 71 instead of 83)
-- `-action:allow` - Hide allow rules (show 60 instead of 83)
-- `-target.type:category` - Hide category rules (show 49 instead of 83)
-
-#### Combined Examples
-**Parent Dashboard**: Show only users' device rules
 ```
-Include: scope.value:"FC:34:97:A5:9F:91"
-Result: 8 device-specific rules (av, social, facebook)
+status:active           # Only active rules
+action:block            # Only block rules
+target.type:app         # Only app rules
+target.type:category    # Only category rules
+target.type:internet    # Only internet rules
+scope.type:group        # Only group-scoped rules
 ```
-
-**IT Admin View**: Show only active security rules
-```
-Include: status:active, action:block
-Result: 48 active blocking rules
-```
-
-**Home User**: Show only app controls
-```
-Include: target.type:app
-Result: 13 app rules (YouTube, Facebook, TikTok, etc.)
-```
-
-### Available Filter Types
-- **Status**: `status:active`, `status:paused`
-- **Action**: `action:block`, `action:allow`
-- **Type**: `target.type:app`, `target.type:category`, `target.type:internet`, `target.type:ip`, `target.type:domain`
-- **Device**: `scope.value:"MAC:ADDRESS"`, `device.name:*iphone*`
 
 ## Entities
 
-### Switch Entities (Rule Control)
+All entity names are derived from API data. Users can override display names via **Settings > Entities > friendly_name**.
 
-#### Rule Control Switches
-- **Entity ID**: `switch.firewalla_rule_{rule_name}` (e.g., `switch.firewalla_rule_youtube`, `switch.firewalla_rule_internet_access`)
-- **Purpose**: Control individual Firewalla rules (pause/unpause)
-- **States**: 
-  - `on`: Rule is active (unpaused)
-  - `off`: Rule is paused (temporarily disabled)
-- **Naming**: Uses human-readable names based on rule description or rule type/target
-- **Attributes**: 
-  - `rule_id`: Firewalla rule identifier
-  - `rule_type`: Type of rule (internet, category, domain, etc.)
-  - `target`: Rule target (MAC address, category, domain, etc.)
-  - `target_name`: Human-readable target name
-  - `action`: Rule action (block, allow, etc.)
-  - `priority`: Rule priority level
-  - `schedule`: Rule schedule information (if applicable)
-  - `created_at`: Rule creation timestamp
-  - `modified_at`: Rule last modification timestamp
-  - `description`: Rule description
+### Switches
 
-### Sensor Entities
+| Entity | Name Source | Description |
+|--------|------------|-------------|
+| Per-rule switch | Rule description/target | ON = rule active, OFF = rule paused |
+| Group internet switch | `{action} {target.type}` | ON = internet allowed (inverted), OFF = blocked |
+| Group rule switch | `{action} {target.value}` | ON = block active, OFF = block paused |
 
-#### Rules Summary Sensor
-- **Entity ID**: `sensor.firewalla_rules_summary`
-- **Purpose**: Monitor overall rule statistics and integration health
-- **State**: Total number of discovered rules
-- **Attributes**: 
-  - `total_rules`: Total number of discovered rules
-  - `active_rules`: Number of active (unpaused) rules
-  - `paused_rules`: Number of paused rules
-  - `rules_by_type`: Breakdown of rules by type (internet, category, domain, etc.)
-  - `last_updated`: Last successful rule discovery timestamp
-  - `api_status`: Current API connectivity status
-  - `box_name`: Firewalla box name
-  - `box_model`: Firewalla box model
-  - `box_online`: Firewalla box online status
+### Sensors
 
-## Usage Examples
+| Entity | Name Source | State | Key Attributes |
+|--------|------------|-------|----------------|
+| Rules summary | Static | Total rule count | active, paused, by_type |
+| Time limit | `{target.value}` (e.g., "Internet", "Youtube") | Minutes remaining | quota_minutes, used_minutes, usage_percent, reached |
+| Bandwidth (download) | "Download" | GB (24h) | bytes, mb |
+| Bandwidth (upload) | "Upload" | GB (24h) | bytes, mb |
 
-### Automations
+### Binary Sensors
+
+| Entity | Name Source | State | Key Attributes |
+|--------|------------|-------|----------------|
+| User activity | "Active" | ON = traffic flowing | online_devices, active_devices, download_delta_bytes |
+| Device online | Device name from API | ON = online | ip, mac_vendor, network, last_seen, download_24h_mb, upload_24h_mb |
+
+### Buttons
+
+| Entity | Description |
+|--------|-------------|
+| Refresh | Triggers an immediate full data refresh from the Firewalla API. Clears cached data so the next poll fetches everything fresh. |
+
+### Device Grouping
+
+Each Firewalla user group becomes an HA **device** named after the user (e.g., "Alice", "Bob"). All entities for that user are grouped under their device. The main Firewalla box is also a device, hosting the rules summary sensor and refresh button.
+
+## Architecture
+
+```
+Home Assistant
++-----------+  +----------+  +---------------+  +----------+
+| switch.py |  | sensor.py|  | binary_sensor |  | button.py|
+| RuleSwitch|  | Summary  |  | UserActivity  |  | Refresh  |
+| GroupInet |  | TimeLimit|  | DeviceOnline  |  |          |
+| GroupRule |  | Bandwidth|  |               |  |          |
++-----+-----+  +----+-----+  +------+--------+  +----+-----+
+      |              |               |                |
+      +--------------+---------------+----------------+
+                     |
+          +----------v----------+
+          |   coordinator.py    |
+          | DataUpdateCoordinator|
+          |  + MSP API Client   |
+          +----------+----------+
+                     | HTTPS
+          +----------v----------+
+          | Firewalla MSP API v2|
+          | /v2/rules           |
+          | /v2/devices         |
+          | /v2/users           |
+          | /v2/rules/{id}/pause|
+          | /v2/rules/{id}/resume|
+          +---------------------+
+```
+
+### Split-Polling Strategy
+
+The integration uses split-polling to minimize API calls while keeping time-sensitive data fresh:
+
+| Data | Refresh Rate | Payload | What it provides |
+|------|-------------|---------|------------------|
+| Time limit rules | Every base poll (default 45s) | ~5.5 KB | Minutes remaining, usage percentage — changes constantly |
+| All rules | Configurable (default 5 min) | ~55 KB | Block/allow status, hit counts, schedules — changes rarely |
+| Devices | Configurable (default 10 min) | ~45 KB | Online/offline, IPs, bandwidth, activity detection |
+| Users | Configurable (default 30 min) | ~2 KB | User/group names — almost never changes |
+
+### Time Limit Detection
+
+Firewalla represents time limits in two ways:
+- `action: timelimit` + `scope: user` — app-specific limits (e.g., YouTube 60 min/day)
+- `action: block` + `target: internet` + `scope: group` with `timeUsage` — Internet time limits (e.g., 2 hr/day)
+
+Both are detected and surfaced as time limit sensors with `usage_percent` (capped at 100%).
+
+## Dashboard
+
+### Prerequisites
+
+Install from HACS:
+- **auto-entities** — auto-discovers entities by pattern
+- **entity-progress-card** — color-coded progress bars for time limits
+
+### Layout
+
+The included dashboard template (`custom_components/firewalla/dashboard/firewalla_parental.yaml`) uses a per-user column layout:
+
+1. **Activity tile** — online/offline with traffic detection
+2. **Internet tile** — toggle switch
+3. **Bandwidth (24h)** — download and upload in GB
+4. **Time limits** — entity-progress-card with usage percentage (green/orange/red)
+5. **Devices** — per-device online/offline with last-changed
+6. **Blocks** — content block toggles
+
+### Usage Examples
 
 #### Activate Rules During Work Hours
 ```yaml
 automation:
-  - alias: "Activate Gaming Block During Work Hours"
+  - alias: "Block Gaming During Work Hours"
     trigger:
       - platform: time
         at: "09:00:00"
     condition:
       - condition: time
-        weekday:
-          - mon
-          - tue
-          - wed
-          - thu
-          - fri
+        weekday: [mon, tue, wed, thu, fri]
     action:
       - service: switch.turn_on
         target:
           entity_id: switch.firewalla_rule_gaming_category
 ```
 
-#### Pause Rules in the Evening
+#### Time Limit Notification
 ```yaml
 automation:
-  - alias: "Pause Internet Restrictions in Evening"
+  - alias: "Warn When Time Limit Almost Reached"
     trigger:
-      - platform: time
-        at: "18:00:00"  # 6 PM
-    action:
-      - service: switch.turn_off
-        target:
-          entity_id: 
-            - switch.firewalla_rule_internet_access
-            - switch.firewalla_rule_gaming_category
-```
-
-#### Rule Status Notifications
-```yaml
-automation:
-  - alias: "Notify When Rules Change"
-    trigger:
-      - platform: state
-        entity_id: sensor.firewalla_rules_summary
-        attribute: active_rules
+      - platform: numeric_state
+        entity_id: sensor.alice_internet
+        attribute: usage_percent
+        above: 80
     action:
       - service: notify.mobile_app
         data:
-          message: "Firewalla active rules changed to {{ trigger.to_state.attributes.active_rules }}"
+          message: "Internet time limit is at {{ state_attr('sensor.alice_internet', 'usage_percent') }}%"
 ```
 
-#### Weekend Rule Management
-```yaml
-automation:
-  - alias: "Weekend Rule Relaxation"
-    trigger:
-      - platform: time
-        at: "08:00:00"
-    condition:
-      - condition: time
-        weekday:
-          - sat
-          - sun
-    action:
-      - service: switch.turn_off
-        target:
-          entity_id: 
-            - switch.firewalla_rule_internet_access
-            - switch.firewalla_rule_gaming_category
-```
+## FAQ
 
-### Dashboard Cards
+### What is the MSP API?
 
-#### Rule Control Card
-```yaml
-type: entities
-title: Firewalla Rule Control
-entities:
-  - switch.firewalla_rule_internet_access
-  - switch.firewalla_rule_gaming_category
-  - switch.firewalla_rule_social_category
-  - switch.firewalla_rule_youtube
-  - switch.firewalla_rule_facebook
-  - sensor.firewalla_rules_summary
-```
+The MSP (Managed Service Provider) API is Firewalla's cloud API for managing devices and rules. It's separate from the local API on the box. You need an MSP account and a Personal Access Token to use it.
 
-#### Rule Statistics Card
-```yaml
-type: glance
-title: Rule Statistics
-entities:
-  - entity: sensor.firewalla_rules_summary
-    name: Total Rules
-  - entity: sensor.firewalla_rules_summary
-    name: Active Rules
-    attribute: active_rules
-  - entity: sensor.firewalla_rules_summary
-    name: Paused Rules
-    attribute: paused_rules
-```
+### What are the API rate limits?
 
-#### Rule Management Card
-```yaml
-type: custom:auto-entities
-card:
-  type: entities
-  title: All Firewalla Rules
-filter:
-  include:
-    - entity_id: "switch.firewalla_rule_*"
-  exclude: []
-sort:
-  method: name
-```
+Firewalla enforces two rate limits:
+- **Short-term:** 100 requests per 5 minutes per token
+- **Long-term:** 3,000 requests per day per token
+
+At default settings, this integration uses ~1.7 calls/min (~2,448/day), which is 82% of the daily budget. This leaves room for manual refreshes, filter queries, and rule toggles.
+
+### How do I avoid hitting rate limits?
+
+- Increase the **Base Poll Interval** and **Devices Refresh** in integration options
+- Remove include/exclude filters you don't need — each filter adds an API call per full rules refresh
+- Use the **Refresh** button for on-demand updates instead of lowering poll intervals
+- If you see HTTP 429 errors, the integration retries automatically with exponential backoff (1s, 2s, 4s, 8s)
+
+### How do I update my API token?
+
+Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure**. Enter your new token and save. The integration reloads automatically. Firewalla MSP tokens (Google OAuth) can expire after ~1 hour.
+
+### Why don't I see time limit sensors?
+
+Time limit sensors only appear for:
+- Active (non-paused) time limits
+- Rules with `quota > 0`
+- App time limits (`action: timelimit` + `scope: user`) or Internet time limits (`action: block` + `scope: group` with `timeUsage` data)
+
+### Why are my device sensors slow to update?
+
+Device data (online/offline, bandwidth) refreshes at the **Devices Refresh** interval (default 10 min). This is intentional to reduce API calls — device data is ~45 KB per fetch. Lower this interval if you need faster updates, but watch your daily API budget.
+
+### How do I rename entities?
+
+All entity names come from the Firewalla API. To customize display names, go to **Settings > Entities**, find the entity, and set a **friendly_name**. This doesn't affect the entity ID.
+
+### Can I create new Firewalla rules from Home Assistant?
+
+No. This integration manages existing rules only (pause/resume). Rule creation must be done in the Firewalla app.
+
+### How do I trigger a manual refresh?
+
+Press the **Refresh** button on the Firewalla device page, or call the `button.press` service on `button.firewalla_refresh`. This clears all cached data and triggers an immediate full fetch.
+
+### What happens if I have multiple Firewalla boxes?
+
+Each box is set up as a separate integration instance. During setup, you'll be prompted to select which box to manage. Each box has its own coordinator, entities, and polling intervals.
 
 ## Troubleshooting
 
-### Common Issues
+### "Failed to pause/resume rule" errors
 
-#### Authentication Errors
-- **Problem**: "Invalid MSP API credentials"
-- **Solution**: Verify your personal access token is correct and has proper permissions
+- Check that your Personal Access Token has write permissions
+- Verify the Firewalla box is online and reachable
 
-#### Connection Errors
-- **Problem**: "Cannot connect to Firewalla MSP API"
-- **Solutions**:
-  - Check your MSP API URL
-  - Verify network connectivity
-  - Ensure firewall allows outbound HTTPS connections
+### Token expired / Authentication failed
 
-#### No Boxes Found
-- **Problem**: "No Firewalla boxes found in your MSP account"
-- **Solution**: Ensure your MSP account has access to at least one Firewalla box
+- Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure**
+- Enter a fresh token from your Firewalla MSP portal
 
-#### Rule Access Failed
-- **Problem**: "Cannot access rules. Please check your MSP permissions"
-- **Solution**: Verify your MSP account has permissions to view and manage rules
+### Entities not appearing
 
-#### No Rules Discovered
-- **Problem**: Integration sets up but no rule entities are created
-- **Solutions**:
-  - Ensure you have existing rules in your Firewalla configuration
-  - Check that rules are not disabled or system-managed
-  - Verify API permissions allow rule access
+- Check **Settings > Devices & Services > Firewalla** for error messages
+- Enable debug logging: add `custom_components.firewalla: debug` to `configuration.yaml`
 
-#### Entities Not Updating
-- **Problem**: Rule entity states not reflecting current status
-- **Solutions**:
-  - Check Home Assistant logs for API errors
-  - Verify Firewalla box is online and accessible
-  - Try reloading the integration
-  - Check if rules were modified outside of Home Assistant
+### Rate limiting (HTTP 429)
+
+- Increase polling intervals in the integration options
+- The integration retries with exponential backoff (1s, 2s, 4s, 8s)
 
 ### Debug Logging
-
-Enable debug logging to troubleshoot issues:
 
 ```yaml
 logger:
@@ -337,72 +319,31 @@ logger:
     custom_components.firewalla: debug
 ```
 
-### API Rate Limits
-
-The integration respects Firewalla's API rate limits:
-- Maximum 10 requests per minute per device
-- Automatic retry with exponential backoff
-- Intelligent caching to minimize API calls
-
 ## Development
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
-
-### Running Tests
 
 ```bash
 # Install test dependencies
 pip install -r tests/requirements.txt
 
 # Run all tests
-python run_tests.py
+pytest tests/ -v --tb=short
 
-# Run specific tests
+# Run a single test file
 pytest tests/test_coordinator.py -v
+
+# Run tests matching a pattern
+pytest tests/ -k "test_split_polling" -v
 ```
 
-### Code Quality
+## API Reference
 
-The project maintains high code quality standards:
-- Type hints throughout the codebase
-- Comprehensive error handling
-- Extensive test coverage
-- Home Assistant coding standards compliance
+- [Firewalla MSP API Docs](https://docs.firewalla.net)
+- [MSP API Examples](https://github.com/firewalla/msp-api-examples)
 
-## Support
+## Changelog
 
-### Getting Help
-
-- **Issues**: [GitHub Issues](https://github.com/djuntgen/firewalla-home-assistant/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/djuntgen/firewalla-home-assistant/discussions)
-- **Home Assistant Community**: [Community Forum](https://community.home-assistant.io/)
-
-### Reporting Bugs
-
-When reporting bugs, please include:
-- Home Assistant version
-- Integration version
-- Firewalla device model
-- Relevant log entries
-- Steps to reproduce
+See [CHANGELOG.md](docs/CHANGELOG.md) for version history.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Firewalla](https://firewalla.com/) for providing the MSP API
-- [Home Assistant](https://www.home-assistant.io/) community for integration standards
-- [HACS](https://hacs.xyz/) for custom component distribution
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for version history and breaking changes.

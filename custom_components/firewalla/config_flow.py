@@ -27,11 +27,13 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BOX_GID,
     CONF_DEVICES_INTERVAL,
+    CONF_BASE_POLL_INTERVAL,
     CONF_EXCLUDE_FILTERS,
     CONF_FULL_RULES_INTERVAL,
     CONF_INCLUDE_FILTERS,
     CONF_MSP_URL,
     CONF_USERS_CACHE_TTL,
+    DEFAULT_BASE_POLL_INTERVAL,
     DEFAULT_DEVICES_INTERVAL,
     DEFAULT_FULL_RULES_INTERVAL,
     DEFAULT_MSP_URL_FORMAT,
@@ -481,6 +483,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             options_data = {
                 CONF_INCLUDE_FILTERS: include_filters,
                 CONF_EXCLUDE_FILTERS: exclude_filters,
+                CONF_BASE_POLL_INTERVAL: user_input.get(
+                    CONF_BASE_POLL_INTERVAL, DEFAULT_BASE_POLL_INTERVAL
+                ),
                 CONF_FULL_RULES_INTERVAL: user_input.get(
                     CONF_FULL_RULES_INTERVAL, DEFAULT_FULL_RULES_INTERVAL
                 ),
@@ -518,17 +523,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         description={"suggested_value": exclude_filters_str},
                     ): str,
                     vol.Optional(
+                        CONF_BASE_POLL_INTERVAL,
+                        default=current_options.get(
+                            CONF_BASE_POLL_INTERVAL, DEFAULT_BASE_POLL_INTERVAL
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=300)),
+                    vol.Optional(
                         CONF_FULL_RULES_INTERVAL,
                         default=current_options.get(
                             CONF_FULL_RULES_INTERVAL, DEFAULT_FULL_RULES_INTERVAL
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=900)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=60, max=900)),
                     vol.Optional(
                         CONF_DEVICES_INTERVAL,
                         default=current_options.get(
                             CONF_DEVICES_INTERVAL, DEFAULT_DEVICES_INTERVAL
                         ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=30, max=600)),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=60, max=600)),
                     vol.Optional(
                         CONF_USERS_CACHE_TTL,
                         default=current_options.get(

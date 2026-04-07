@@ -30,15 +30,21 @@
   - Device names use group/user name directly (no "Firewalla Group:" prefix)
 
 - **Split-polling optimization**
-  - Time limit rules fetched every 30s (~5.5 KB payload)
+  - Time limit rules fetched every base poll (~5.5 KB payload)
   - Full rules fetched at configurable interval (~55 KB payload)
   - ~85% bandwidth reduction on the rules endpoint
 
 - **Configurable polling intervals**
-  - Full rules refresh interval (default 180s, range 30-900s)
-  - Devices refresh interval (default 60s, range 30-600s)
-  - Users cache TTL (default 600s, range 60-3600s)
+  - Base poll interval (default 45s, range 30-300s) — controls how often time limits update
+  - Full rules refresh interval (default 300s, range 60-900s) — all rule data
+  - Devices refresh interval (default 600s, range 60-600s) — online status, bandwidth, activity
+  - Users cache TTL (default 1800s, range 60-3600s) — user/group names
   - Configured via Settings > Integrations > Firewalla > Configure
+  - ~1.7 API calls/min at defaults (82% of Firewalla's 3,000/day limit)
+
+- **Manual refresh button**
+  - On-demand full data refresh from the Firewalla device page
+  - Clears cached data and triggers immediate API fetch
 
 - **Reconfigure flow**
   - Update MSP domain and access token without deleting the integration

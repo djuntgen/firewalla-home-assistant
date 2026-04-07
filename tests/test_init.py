@@ -55,7 +55,7 @@ class TestAsyncSetupEntry:
 
             # Verify platforms were set up
             mock_hass.config_entries.async_forward_entry_setups.assert_called_once_with(
-                mock_config_entry, ["switch", "sensor", "binary_sensor"]
+                mock_config_entry, ["switch", "sensor", "binary_sensor", "button"]
             )
 
     @pytest.mark.asyncio
@@ -220,7 +220,7 @@ class TestAsyncUnloadEntry:
 
         # Verify platforms were unloaded
         mock_hass.config_entries.async_unload_platforms.assert_called_once_with(
-            mock_config_entry, ["switch", "sensor", "binary_sensor"]
+            mock_config_entry, ["switch", "sensor", "binary_sensor", "button"]
         )
 
     @pytest.mark.asyncio
@@ -460,7 +460,7 @@ class TestEndToEndIntegration:
 
             # Verify platforms were set up
             mock_hass.config_entries.async_forward_entry_setups.assert_called_once_with(
-                mock_config_entry, ["switch", "sensor", "binary_sensor"]
+                mock_config_entry, ["switch", "sensor", "binary_sensor", "button"]
             )
 
             # Verify coordinator data is accessible

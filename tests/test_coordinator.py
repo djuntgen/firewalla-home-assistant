@@ -13,6 +13,7 @@ from custom_components.firewalla.coordinator import (
 )
 from custom_components.firewalla.const import (
     API_ENDPOINTS,
+    DEFAULT_BASE_POLL_INTERVAL,
     DEFAULT_DEVICES_INTERVAL,
     DEFAULT_FULL_RULES_INTERVAL,
     DEFAULT_USERS_CACHE_TTL,
@@ -846,18 +847,20 @@ class TestSplitPolling:
             msp_domain="test.firewalla.net",
             access_token="test_token_123",
             box_gid="box-123",
-            full_rules_interval=180,  # every 6 polls (180/30)
-            devices_interval=60,  # every 2 polls (60/30)
-            users_cache_ttl=600,
+            base_poll_interval=45,
+            full_rules_interval=300,  # every ~7 polls (300/45)
+            devices_interval=600,  # every ~13 polls (600/45)
+            users_cache_ttl=1800,
         )
 
     def test_configurable_intervals_stored(self, coordinator):
         """Test that configurable intervals are stored correctly."""
-        assert coordinator._full_rules_interval == 180
-        assert coordinator._devices_interval == 60
-        assert coordinator._users_cache_ttl == 600
-        assert coordinator._full_rules_every == 6
-        assert coordinator._devices_every == 2
+        assert coordinator._base_poll_interval == 45
+        assert coordinator._full_rules_interval == 300
+        assert coordinator._devices_interval == 600
+        assert coordinator._users_cache_ttl == 1800
+        assert coordinator._full_rules_every == 6  # 300 // 45
+        assert coordinator._devices_every == 13  # 600 // 45
 
     def test_minimum_interval_clamping(self, mock_hass, mock_aiohttp_session):
         """Test that intervals are clamped to sensible minimums."""
@@ -867,12 +870,14 @@ class TestSplitPolling:
             msp_domain="test.firewalla.net",
             access_token="test_token_123",
             box_gid="box-123",
-            full_rules_interval=10,  # below UPDATE_INTERVAL=30
+            base_poll_interval=10,  # below minimum of 30
+            full_rules_interval=10,  # below base_poll_interval
             devices_interval=5,
             users_cache_ttl=10,
         )
-        assert coord._full_rules_interval == UPDATE_INTERVAL  # clamped to 30
-        assert coord._devices_interval == UPDATE_INTERVAL
+        assert coord._base_poll_interval == 30  # clamped to 30
+        assert coord._full_rules_interval == 30  # clamped to base
+        assert coord._devices_interval == 30  # clamped to base
         assert coord._users_cache_ttl == 60  # minimum 60s
 
     @pytest.mark.asyncio
@@ -945,7 +950,7 @@ class TestSplitPolling:
 
     @pytest.mark.asyncio
     async def test_devices_polled_at_configured_interval(self, coordinator):
-        """Devices should be fetched every 2 polls (devices_interval=60)."""
+        """Devices should be fetched every 13 polls (devices_interval=600, base=45)."""
         coordinator.api._authenticated = True
         rules = [{"id": "r1", "action": "block", "type": "internet", "disabled": False, "paused": False}]
         mock_devices = [{"id": "AA:BB", "name": "Phone", "online": True}]
@@ -953,15 +958,16 @@ class TestSplitPolling:
         coordinator.api.get_devices = AsyncMock(return_value=mock_devices)
         coordinator.api.get_users = AsyncMock(return_value=[{"id": "box:1", "name": "Test"}])
 
-        # Poll 1 — devices fetched (first poll, poll_count=1, 1%2=1)
+        # Poll 1 — devices fetched (first poll, poll_count=1, 1%13=1)
         await coordinator._async_update_data()
         assert coordinator.api.get_devices.call_count == 1
 
-        # Poll 2 — devices NOT fetched (poll_count=2, 2%2=0, cache exists)
-        await coordinator._async_update_data()
+        # Polls 2-13 — devices NOT fetched (cache exists, poll_count%13 != 1)
+        for _ in range(12):
+            await coordinator._async_update_data()
         assert coordinator.api.get_devices.call_count == 1
 
-        # Poll 3 — devices fetched (poll_count=3, 3%2=1)
+        # Poll 14 — devices fetched (poll_count=14, 14%13=1)
         await coordinator._async_update_data()
         assert coordinator.api.get_devices.call_count == 2
 
@@ -974,6 +980,7 @@ class TestSplitPolling:
             access_token="test_token_123",
             box_gid="box-123",
         )
+        assert coord._base_poll_interval == DEFAULT_BASE_POLL_INTERVAL
         assert coord._full_rules_interval == DEFAULT_FULL_RULES_INTERVAL
         assert coord._devices_interval == DEFAULT_DEVICES_INTERVAL
         assert coord._users_cache_ttl == DEFAULT_USERS_CACHE_TTL

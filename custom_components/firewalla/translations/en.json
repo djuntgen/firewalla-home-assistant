@@ -58,20 +58,22 @@
     "step": {
       "init": {
         "title": "Firewalla Options",
-        "description": "Configure rule filters and API polling intervals. Lower intervals give faster updates but use more API calls.",
+        "description": "Configure rule filters and API polling intervals. Lower intervals mean faster updates but more API calls. If you hit rate limits (HTTP 429), increase these values.",
         "data": {
           "include_filters": "Include Filters",
           "exclude_filters": "Exclude Filters",
+          "base_poll_interval": "Base Poll Interval (seconds)",
           "full_rules_interval": "Full Rules Refresh (seconds)",
           "devices_interval": "Devices Refresh (seconds)",
           "users_cache_ttl": "Users Cache Duration (seconds)"
         },
         "data_description": {
-          "include_filters": "One filter per line. Only rules matching these filters will be shown.",
+          "include_filters": "One filter per line. Only rules matching these filters will be shown (OR logic).",
           "exclude_filters": "One filter per line. Rules matching these filters will be hidden.",
-          "full_rules_interval": "How often to fetch all rules (30-900s, default 180s). Time limit rules are always fetched every 30s.",
-          "devices_interval": "How often to refresh device data for activity detection (30-600s, default 60s).",
-          "users_cache_ttl": "How long to cache user/group name data (60-3600s, default 600s)."
+          "base_poll_interval": "How often to call the Firewalla API (30-300s, default 45s). Each poll fetches time limit data (~5 KB). All other data types refresh at their own intervals below. A manual Refresh button is also available on the Firewalla device page.",
+          "full_rules_interval": "How often to fetch all firewall rules including block/allow status, hit counts, and schedules (~55 KB). Between full refreshes, only time limit rules are fetched. (60-900s, default 300s)",
+          "devices_interval": "How often to fetch device data: online/offline status, IP addresses, bandwidth usage, and activity detection (~45 KB). Increasing this reduces API calls but delays device status updates. (60-600s, default 600s)",
+          "users_cache_ttl": "How long to cache user and group names before re-fetching (~2 KB). Names rarely change, so this can be high. (60-3600s, default 1800s)"
         }
       }
     }

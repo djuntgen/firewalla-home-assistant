@@ -17,6 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_BASE_POLL_INTERVAL,
     CONF_BOX_GID,
     CONF_DEVICES_INTERVAL,
     CONF_EXCLUDE_FILTERS,
@@ -24,6 +25,7 @@ from .const import (
     CONF_INCLUDE_FILTERS,
     CONF_MSP_URL,
     CONF_USERS_CACHE_TTL,
+    DEFAULT_BASE_POLL_INTERVAL,
     DEFAULT_DEVICES_INTERVAL,
     DEFAULT_FULL_RULES_INTERVAL,
     DEFAULT_USERS_CACHE_TTL,
@@ -71,6 +73,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         exclude_filters = entry.options.get(CONF_EXCLUDE_FILTERS, [])
 
         # Get polling interval options
+        base_poll_interval = entry.options.get(
+            CONF_BASE_POLL_INTERVAL, DEFAULT_BASE_POLL_INTERVAL
+        )
         full_rules_interval = entry.options.get(
             CONF_FULL_RULES_INTERVAL, DEFAULT_FULL_RULES_INTERVAL
         )
@@ -91,6 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config_entry=entry,
             include_filters=include_filters,
             exclude_filters=exclude_filters,
+            base_poll_interval=base_poll_interval,
             full_rules_interval=full_rules_interval,
             devices_interval=devices_interval,
             users_cache_ttl=users_cache_ttl,

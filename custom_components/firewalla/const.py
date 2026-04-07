@@ -10,6 +10,7 @@ CONF_BOX_GID = "box_gid"
 CONF_RULE_FILTERS = "rule_filters"
 CONF_INCLUDE_FILTERS = "include_filters"
 CONF_EXCLUDE_FILTERS = "exclude_filters"
+CONF_BASE_POLL_INTERVAL = "base_poll_interval"
 CONF_FULL_RULES_INTERVAL = "full_rules_interval"
 CONF_DEVICES_INTERVAL = "devices_interval"
 CONF_USERS_CACHE_TTL = "users_cache_ttl"
@@ -75,16 +76,17 @@ RULE_QUERY_PARAMS = {
 
 # Timeouts and intervals
 API_TIMEOUT = 30  # seconds
-UPDATE_INTERVAL = 30  # seconds — base coordinator poll cycle
+UPDATE_INTERVAL = 45  # seconds — base coordinator poll cycle (default)
 RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_FACTOR = 2
 RETRY_DELAYS = [1, 2, 4, 8]  # Exponential backoff delays in seconds
 
 # Split-polling defaults (configurable via options flow)
-DEFAULT_FULL_RULES_INTERVAL = 180  # seconds — full rules refresh (default 3 min)
-DEFAULT_DEVICES_INTERVAL = 60  # seconds — device list refresh (default 1 min)
-DEFAULT_USERS_CACHE_TTL = 600  # seconds — user data cache (default 10 min)
-# Timelimit-only rules are fetched every base poll (30s) between full refreshes
+DEFAULT_BASE_POLL_INTERVAL = 45  # seconds — base coordinator poll cycle
+DEFAULT_FULL_RULES_INTERVAL = 300  # seconds — full rules refresh (default 5 min)
+DEFAULT_DEVICES_INTERVAL = 600  # seconds — device list refresh (default 10 min)
+DEFAULT_USERS_CACHE_TTL = 1800  # seconds — user data cache (default 30 min)
+# Timelimit-only rules are fetched every base poll between full refreshes
 
 # Authentication
 AUTH_HEADER_FORMAT = "Token {token}"
@@ -139,7 +141,7 @@ TARGET_PREFIXES = {
 }
 
 # Platforms
-PLATFORMS = ["switch", "sensor", "binary_sensor"]
+PLATFORMS = ["switch", "sensor", "binary_sensor", "button"]
 
 # Device information constants
 DEVICE_MANUFACTURER = "Firewalla"
