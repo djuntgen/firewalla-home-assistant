@@ -79,7 +79,7 @@ API_TIMEOUT = 30  # seconds
 UPDATE_INTERVAL = 45  # seconds — base coordinator poll cycle (default)
 RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_FACTOR = 2
-RETRY_DELAYS = [1, 2, 4, 8]  # Exponential backoff delays in seconds
+RETRY_DELAYS = [1, 2, 4]  # Exponential backoff delays in seconds (one per retry attempt)
 
 # Split-polling defaults (configurable via options flow)
 DEFAULT_BASE_POLL_INTERVAL = 45  # seconds — base coordinator poll cycle

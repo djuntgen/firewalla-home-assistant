@@ -179,7 +179,8 @@ The integration uses split-polling to minimize API calls while keeping time-sens
 
 | Data | Refresh Rate | Payload | What it provides |
 |------|-------------|---------|------------------|
-| Time limit rules | Every base poll (default 45s) | ~5.5 KB | Minutes remaining, usage percentage — changes constantly |
+| App time limits | Every base poll (default 45s) | ~5.5 KB | Minutes remaining, usage percentage for `action:timelimit` rules |
+| Internet time limits | Full rules refresh (default 5 min) | included in full rules | Block rules with `timeUsage` data — updated with all rules |
 | All rules | Configurable (default 5 min) | ~55 KB | Block/allow status, hit counts, schedules — changes rarely |
 | Devices | Configurable (default 10 min) | ~45 KB | Online/offline, IPs, bandwidth, activity detection |
 | Users | Configurable (default 30 min) | ~2 KB | User/group names — almost never changes |
@@ -265,7 +266,7 @@ At default settings, this integration uses ~1.7 calls/min (~2,448/day), which is
 - Increase the **Base Poll Interval** and **Devices Refresh** in integration options
 - Remove include/exclude filters you don't need — each filter adds an API call per full rules refresh
 - Use the **Refresh** button for on-demand updates instead of lowering poll intervals
-- If you see HTTP 429 errors, the integration retries automatically with exponential backoff (1s, 2s, 4s, 8s)
+- If you see HTTP 429 errors, the integration retries automatically with exponential backoff (1s, 2s, 4s)
 
 ### How do I update my API token?
 
@@ -319,7 +320,7 @@ Each box is set up as a separate integration instance. During setup, you'll be p
 ### Rate limiting (HTTP 429)
 
 - Increase polling intervals in the integration options
-- The integration retries with exponential backoff (1s, 2s, 4s, 8s)
+- The integration retries with exponential backoff (1s, 2s, 4s)
 
 ### Debug Logging
 
