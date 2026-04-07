@@ -65,7 +65,7 @@ A Home Assistant custom integration for managing Firewalla firewall rules, group
 
 ### Updating Credentials
 
-Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure** to update your MSP domain or access token without deleting the integration. Useful when tokens expire.
+Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure** to update your MSP domain or access token without deleting the integration.
 
 ### Polling Intervals (Settings > Integrations > Firewalla > Configure)
 
@@ -269,7 +269,7 @@ At default settings, this integration uses ~1.7 calls/min (~2,448/day), which is
 
 ### How do I update my API token?
 
-Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure**. Enter your new token and save. The integration reloads automatically. Firewalla MSP tokens (Google OAuth) can expire after ~1 hour.
+Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure**. Enter your new token and save. The integration reloads automatically. Personal Access Tokens are long-lived until revoked.
 
 ### Why don't I see time limit sensors?
 
@@ -305,10 +305,11 @@ Each box is set up as a separate integration instance. During setup, you'll be p
 - Check that your Personal Access Token has write permissions
 - Verify the Firewalla box is online and reachable
 
-### Token expired / Authentication failed
+### Authentication failed
 
 - Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure**
-- Enter a fresh token from your Firewalla MSP portal
+- Generate a new Personal Access Token from your Firewalla MSP portal
+- PATs are long-lived until revoked — if auth fails, the token may have been revoked or regenerated
 
 ### Entities not appearing
 
