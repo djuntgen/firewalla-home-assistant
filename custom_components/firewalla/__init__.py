@@ -62,23 +62,13 @@ def _build_user_section(name: str) -> dict:
                 "color": "red",
             },
             {
-                "type": "custom:auto-entities",
-                "card": {
-                    "type": "glance",
-                    "title": "Bandwidth (24h)",
-                    "show_state": True,
-                },
-                "filter": {
-                    "include": [
-                        {
-                            "entity_id": (
-                                f"sensor.firewalla_group_{slug}_{slug}_download"
-                            )
-                        },
-                        {"entity_id": (f"sensor.firewalla_group_{slug}_{slug}_upload")},
-                    ]
-                },
-                "show_empty": False,
+                "type": "history-graph",
+                "title": "Bandwidth (24h)",
+                "hours_to_show": 24,
+                "entities": [
+                    {"entity": f"sensor.{slug}_download", "name": "Download"},
+                    {"entity": f"sensor.{slug}_upload", "name": "Upload"},
+                ],
             },
             {
                 "type": "custom:auto-entities",
