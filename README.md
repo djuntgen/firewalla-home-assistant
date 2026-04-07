@@ -10,12 +10,20 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/djuntgen/firewalla-home-assistant.svg" alt="License"></a>
 </p>
 
-A Home Assistant custom integration for managing Firewalla firewall rules, groups, and parental controls via the MSP (Managed Service Provider) API v2.
+A Home Assistant custom integration for managing Firewalla firewall rules, parental controls, and device monitoring via the MSP (Managed Service Provider) API v2.
+
+## Why This Exists
+
+Firewalla is great at managing your network, but checking time limits and toggling rules means opening the Firewalla app. This integration brings it all into Home Assistant so that:
+
+- **Kids can see their own usage** — log into HA to check remaining screen time and internet limits, no parental app access needed
+- **Parents can manage controls from any device** — toggle internet, app blocks, and time limits from the HA dashboard without opening the Firewalla app
+- **It works with Apple HomeKit** — HA's HomeKit bridge exposes Firewalla switches to the Home app on every iPhone. No extra apps to install, no explanations needed. If your spouse has to ask how it works, it doesn't work.
 
 ## Features
 
 - **Rule switches** — each Firewalla rule becomes an HA switch (toggle pause/resume)
-- **Group internet switches** — per-group internet control, derived from API data
+- **Group internet switches** — "Block On" / "Block Off" matching the Firewalla app UX
 - **Per-group rule switches** — category/app block rules per group
 - **Time limit sensors** — per-user app and internet time limits with remaining minutes, quota, usage percentage
 - **Per-user bandwidth sensors** — 24h download/upload in GB per user group
@@ -23,12 +31,14 @@ A Home Assistant custom integration for managing Firewalla firewall rules, group
 - **User activity sensors** — binary sensors detecting active internet usage per user
 - **Rules summary sensor** — overview of total/active/paused rules with breakdown by type
 - **Manual refresh button** — on-demand full data refresh from the Firewalla device page
+- **Auto-generated dashboard** — enter user names, get a per-user parental control dashboard with progress bars, bandwidth graphs, device lists, and block toggles
 - **Dynamic entity lifecycle** — entities auto-add/remove when Firewalla rules, groups, or devices change
 - **Optimistic state updates** — UI reflects toggles immediately, confirmed on next poll
 - **Split-polling** — time-sensitive data polled frequently; bulk data less often
 - **Configurable polling intervals** — tune API call frequency via integration options
 - **Dynamic naming** — all entity names derived from API data, no hardcoded strings
 - **Reconfigure flow** — update MSP credentials without deleting the integration
+- **HomeKit compatible** — all switches are exposed via HA's HomeKit bridge, controllable from the Home app on any iPhone/iPad
 
 ## Prerequisites
 
@@ -134,7 +144,7 @@ All entity names are derived from API data. Users can override display names via
 
 ### Device Grouping
 
-Each Firewalla user group becomes an HA **device** named after the user (e.g., "Alice", "Bob"). All entities for that user are grouped under their device. The main Firewalla box is also a device, hosting the rules summary sensor and refresh button.
+Each Firewalla user group becomes an HA **device** named after the user (e.g., "Matt", "Harvey"). All entities for that user are grouped under their device. The main Firewalla box is also a device, hosting the rules summary sensor and refresh button.
 
 ## Architecture
 
@@ -197,12 +207,17 @@ Both are detected and surfaced as time limit sensors with `usage_percent` (cappe
 
 ### Parental Control Dashboard
 
-The integration can auto-generate a per-user parental control dashboard. Each user gets their own column with activity, internet, bandwidth, time limits, devices, and blocks — all auto-discovered.
+The integration auto-generates a per-user parental control dashboard. Each user gets their own column with activity, internet, bandwidth, time limits, devices, and blocks — all auto-discovered.
 
 #### Prerequisites
 
-1. Install **auto-entities** from HACS (required for dynamic entity discovery)
-2. Create an empty dashboard: **Settings > Dashboards > Add Dashboard**, name it `dashboard-firewalla`, choose "New dashboard from scratch"
+Install from HACS:
+1. **auto-entities** (required) — auto-discovers entities by pattern
+2. **entity-progress-card** (required) — color-coded progress bars for time limits
+
+Then create an empty dashboard in HA:
+- Go to **Settings > Dashboards > Add Dashboard**
+- Name it `dashboard-firewalla`, choose "New dashboard from scratch"
 
 #### Setup
 
@@ -216,18 +231,18 @@ The integration can auto-generate a per-user parental control dashboard. Each us
 
 The dashboard is regenerated each time the integration reloads (e.g., after changing options or restarting HA). To add or remove users, just update the comma-separated list and save.
 
-#### What's generated
+#### What's Generated
 
 Each user column includes:
 
 | Section | What it shows |
 |---------|--------------|
-| **Activity** | Online/offline binary sensor with last-changed timestamp |
-| **Internet** | Internet block switch (Block On / Block Off, matching Firewalla app) |
-| **Bandwidth (24h)** | Download and upload sensors in GB |
-| **Time Limits** | App and internet time limits with remaining minutes |
-| **Devices** | Per-device online/offline sensors with last-changed |
-| **Blocks** | All block rule switches (apps, categories, content) |
+| **Activity** | Tile card — online/offline with green accent |
+| **Internet** | Tile card — internet block toggle with red accent (Block On / Block Off) |
+| **Bandwidth** | History graph — 8h download and upload trend |
+| **Time Limits** | Progress bars — green (0-50%), yellow (50-80%), red (80-100%) using `usage_percent` |
+| **Devices** | Entity list — per-device online/offline with last-changed |
+| **Blocks** | Entity list — all block rule switches (apps, categories, content) |
 
 All entities within each section are auto-discovered using `auto-entities` glob patterns. New rules, time limits, and devices appear automatically without editing the dashboard.
 
@@ -238,15 +253,26 @@ All entities within each section are auto-discovered using `auto-entities` glob 
 - Leave the **Dashboard Users** field empty to skip dashboard generation entirely
 - You can still edit the generated dashboard manually in the HA UI after it's created
 
+### HomeKit Integration
+
+All Firewalla switches are automatically exposed to Apple HomeKit via HA's [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/). This means:
+
+- **Internet block toggles** appear in the Home app on every iPhone and iPad
+- **App and category block switches** can be toggled from Control Center
+- **No extra apps** to install — it just works with the built-in Home app
+- **Siri** can toggle rules: "Hey Siri, turn on Matt Internet"
+
+To set this up, configure the HA HomeKit bridge integration and include the Firewalla switch entities you want exposed.
+
 ### Automation Examples
 
-#### Activate Rules During Work Hours
+#### Block Gaming During School Hours
 ```yaml
 automation:
-  - alias: "Block Gaming During Work Hours"
+  - alias: "Block Gaming During School Hours"
     trigger:
       - platform: time
-        at: "09:00:00"
+        at: "08:00:00"
     condition:
       - condition: time
         weekday: [mon, tue, wed, thu, fri]
@@ -256,19 +282,34 @@ automation:
           entity_id: switch.firewalla_rule_gaming_category
 ```
 
-#### Time Limit Notification
+#### Notify When Time Limit Almost Reached
 ```yaml
 automation:
   - alias: "Warn When Time Limit Almost Reached"
     trigger:
       - platform: numeric_state
-        entity_id: sensor.alice_internet
+        entity_id: sensor.matt_internet_time
         attribute: usage_percent
         above: 80
     action:
       - service: notify.mobile_app
         data:
-          message: "Internet time limit is at {{ state_attr('sensor.alice_internet', 'usage_percent') }}%"
+          message: "Internet time is at {{ state_attr('sensor.matt_internet_time', 'usage_percent') }}% — {{ state_attr('sensor.matt_internet_time', 'remaining_minutes') }} minutes left"
+```
+
+#### Auto-Block Internet at Bedtime
+```yaml
+automation:
+  - alias: "Bedtime Internet Block"
+    trigger:
+      - platform: time
+        at: "21:00:00"
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id:
+            - switch.firewalla_group_matt_matt_internet_access
+            - switch.firewalla_group_harvey_harvey_internet_access
 ```
 
 ## FAQ
@@ -295,6 +336,14 @@ At default settings, this integration uses ~1.7 calls/min (~2,448/day), which is
 ### How do I update my API token?
 
 Go to **Settings > Integrations > Firewalla > 3-dot menu > Reconfigure**. Enter your new token and save. The integration reloads automatically. Personal Access Tokens are long-lived until revoked.
+
+### Can my kids see their own time limits?
+
+Yes. Create an HA user account for each child and set up the parental control dashboard. They can log in and see their remaining time, usage percentage, and which apps are blocked — but they can't toggle switches unless you grant them permission. HA user permissions control what they can change.
+
+### Can I control Firewalla from my iPhone without an app?
+
+Yes. Set up the [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/) in HA and include the Firewalla switch entities. They'll appear in the built-in Home app on every iPhone and iPad — no extra apps to install. Your spouse can toggle internet blocks from Control Center without knowing what Firewalla is.
 
 ### Why don't I see time limit sensors?
 
@@ -323,6 +372,14 @@ Press the **Refresh** button on the Firewalla device page, or call the `button.p
 
 Each box is set up as a separate integration instance. During setup, you'll be prompted to select which box to manage. Each box has its own coordinator, entities, and polling intervals.
 
+### What HACS cards does the dashboard need?
+
+The auto-generated dashboard requires two custom cards from HACS:
+- **auto-entities** — dynamically discovers entities matching glob patterns
+- **entity-progress-card** — renders time limit usage as color-coded progress bars (green/yellow/red)
+
+Both are free and available in the default HACS repository.
+
 ## Troubleshooting
 
 ### "Failed to pause/resume rule" errors
@@ -345,6 +402,12 @@ Each box is set up as a separate integration instance. During setup, you'll be p
 
 - Increase polling intervals in the integration options
 - The integration retries with exponential backoff (1s, 2s, 4s)
+
+### Dashboard shows "Configuration error"
+
+- Make sure **auto-entities** and **entity-progress-card** are installed from HACS
+- Verify the dashboard exists at URL path `dashboard-firewalla`
+- Check that user names in the **Dashboard Users** field exactly match your Firewalla group names
 
 ### Debug Logging
 
