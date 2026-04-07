@@ -107,7 +107,7 @@ All entity names are derived from API data. Users can override display names via
 | Entity | Name Source | Description |
 |--------|------------|-------------|
 | Per-rule switch | Rule description/target | ON = rule active, OFF = rule paused |
-| Group internet switch | "Internet Access" | ON = internet allowed, OFF = internet blocked |
+| Group internet switch | "Internet" | ON = Block On (internet blocked), OFF = Block Off (internet allowed) — matches Firewalla app |
 | Group rule switch | `{action} {target.value}` | ON = block active, OFF = block paused |
 
 ### Sensors

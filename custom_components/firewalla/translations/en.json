@@ -86,6 +86,13 @@
           "on": "Active",
           "off": "Paused"
         }
+      },
+      "internet_block": {
+        "name": "Internet",
+        "state": {
+          "on": "Block On",
+          "off": "Block Off"
+        }
       }
     },
     "sensor": {

@@ -1,157 +1,105 @@
 # Firewalla Parental Control Dashboard
 #
+# Prerequisites (install from HACS):
+# - auto-entities: auto-discovers entities by pattern
+# - entity-progress-card: color-coded progress bars (optional, for time limits)
+#
 # Installation:
-# 1. Install from HACS: "auto-entities" and "mushroom" custom cards
-# 2. Go to Settings > Dashboards > Add Dashboard
-# 3. Choose "New dashboard from scratch", name it "Firewalla"
-# 4. Open the dashboard, click the 3 dots menu > Edit Dashboard
-# 5. Click the 3 dots menu again > Raw Configuration Editor
-# 6. Paste this entire file and save
+# 1. Go to Settings > Dashboards > Add Dashboard
+# 2. Choose "New dashboard from scratch", name it "Firewalla"
+# 3. Open the dashboard, click the 3 dots menu > Edit Dashboard
+# 4. Click the 3 dots menu again > Raw Configuration Editor
+# 5. Paste this entire file and save
 #
-# IMPORTANT: Replace the placeholder names (User_A, User_B, User_C) and
-# entity_id slugs (user_a, user_b, user_c) with your actual Firewalla
-# group names. The slugs must match the lowercase names used in your
-# Home Assistant entity IDs (e.g., firewalla_group_alice_alice_active).
-#
-# Each user gets their own column with activity, internet toggle,
-# time limits (progress bars), and content block switches.
-# New apps/rules auto-discover within each user's column.
-#
-# To add a new user: duplicate a section and change the name/slug.
-# Entity ID pattern: firewalla_group_{slug}_{slug}_{entity}
+# This dashboard is FULLY DYNAMIC — it auto-discovers all Firewalla
+# users and their entities. No hardcoded names or entity IDs.
+# New users, rules, and devices appear automatically.
 
 title: Firewalla Parental Controls
 views:
   - title: Users
     path: users
     icon: mdi:shield-account
-    type: sections
-    max_columns: 3
+    type: panel
     badges:
       - type: entity
-        entity: button.firewalla_box_refresh
+        entity: button.firewalla_refresh
         tap_action:
           action: toggle
-    sections:
-      # ── User_A ─────────────────────────────────────────────
-      # Replace "User_A" / "user_a" with your first group name
-      - type: grid
-        title: User_A
-        cards:
-          - type: custom:auto-entities
-            card:
-              type: entities
-            filter:
-              include:
-                - entity_id: "/binary_sensor\\.firewalla_group_user_a_user_a_active/"
-                  options:
-                    secondary_info: last-changed
-                - entity_id: "/switch\\.firewalla_group_user_a_user_a_internet_access/"
-
-          - type: custom:auto-entities
-            card:
-              type: entities
-              title: Time Limits
-            filter:
-              include:
-                - entity_id: "/sensor\\.firewalla_group_user_a_.*_time/"
-                  options:
-                    type: custom:mushroom-entity-row
-                    fill_container: true
-            sort:
-              method: friendly_name
-
-          - type: custom:auto-entities
-            card:
-              type: entities
-              title: Blocks
-            filter:
-              include:
-                - entity_id: "/switch\\.firewalla_group_user_a_user_a_.*_block/"
-              exclude:
-                - entity_id: "/.*_doh_block/"
-                - entity_id: "switch.firewalla_group_user_a_user_a_block$"
-            sort:
-              method: friendly_name
-
-      # ── User_B ─────────────────────────────────────────────
-      # Replace "User_B" / "user_b" with your second group name
-      - type: grid
-        title: User_B
-        cards:
-          - type: custom:auto-entities
-            card:
-              type: entities
-            filter:
-              include:
-                - entity_id: "/binary_sensor\\.firewalla_group_user_b_user_b_active/"
-                  options:
-                    secondary_info: last-changed
-                - entity_id: "/switch\\.firewalla_group_user_b_user_b_internet_access/"
-
-          - type: custom:auto-entities
-            card:
-              type: entities
-              title: Time Limits
-            filter:
-              include:
-                - entity_id: "/sensor\\.firewalla_group_user_b_.*_time/"
-                  options:
-                    type: custom:mushroom-entity-row
-                    fill_container: true
-            sort:
-              method: friendly_name
-
-          - type: custom:auto-entities
-            card:
-              type: entities
-              title: Blocks
-            filter:
-              include:
-                - entity_id: "/switch\\.firewalla_group_user_b_user_b_.*_block/"
-              exclude:
-                - entity_id: "/.*_doh_block/"
-                - entity_id: "switch.firewalla_group_user_b_user_b_block$"
-            sort:
-              method: friendly_name
-
-      # ── User_C ─────────────────────────────────────────────
-      # Replace "User_C" / "user_c" with your third group name
-      - type: grid
-        title: User_C
-        cards:
-          - type: custom:auto-entities
-            card:
-              type: entities
-            filter:
-              include:
-                - entity_id: "/binary_sensor\\.firewalla_group_user_c_user_c_active/"
-                  options:
-                    secondary_info: last-changed
-                - entity_id: "/switch\\.firewalla_group_user_c_user_c_internet_access/"
-
-          - type: custom:auto-entities
-            card:
-              type: entities
-              title: Time Limits
-            filter:
-              include:
-                - entity_id: "/sensor\\.firewalla_group_user_c_.*_time/"
-                  options:
-                    type: custom:mushroom-entity-row
-                    fill_container: true
-            sort:
-              method: friendly_name
-
-          - type: custom:auto-entities
-            card:
-              type: entities
-              title: Blocks
-            filter:
-              include:
-                - entity_id: "/switch\\.firewalla_group_user_c_user_c_.*_block/"
-              exclude:
-                - entity_id: "/.*_doh_block/"
-                - entity_id: "switch.firewalla_group_user_c_user_c_block$"
-            sort:
-              method: friendly_name
+    cards:
+      - type: custom:auto-entities
+        card:
+          type: sections
+          max_columns: 4
+        card_param: sections
+        filter:
+          template: |-
+            {# Find all user activity sensors to discover users #}
+            {% set ns = namespace(sections=[]) %}
+            {% for state in states.binary_sensor
+               if state.entity_id is match('binary_sensor\.firewalla_group_.*_active$')
+               and state.attributes.get('device_class') is none %}
+              {% set user = state.name | replace(' Active', '') %}
+              {% set slug = state.entity_id | replace('binary_sensor.firewalla_group_', '') | replace('_active', '') %}
+              {% set section = {
+                "type": "grid",
+                "title": user,
+                "cards": [
+                  {
+                    "type": "custom:auto-entities",
+                    "card": {"type": "entities"},
+                    "filter": {
+                      "include": [
+                        {"entity_id": "binary_sensor.firewalla_group_" ~ slug ~ "_active",
+                         "options": {"secondary_info": "last-changed"}},
+                        {"entity_id": "switch.*" ~ slug ~ "*internet*"}
+                      ]
+                    }
+                  },
+                  {
+                    "type": "custom:auto-entities",
+                    "card": {"type": "entities", "title": "Time Limits"},
+                    "filter": {
+                      "include": [
+                        {"entity_id": "sensor.firewalla_group_" ~ slug ~ "_*_time"}
+                      ]
+                    },
+                    "sort": {"method": "friendly_name"},
+                    "show_empty": false
+                  },
+                  {
+                    "type": "custom:auto-entities",
+                    "card": {"type": "entities", "title": "Blocks"},
+                    "filter": {
+                      "include": [
+                        {"entity_id": "switch.firewalla_group_" ~ slug ~ "_*_block"},
+                        {"entity_id": "switch.*_block_*",
+                         "options": {"secondary_info": "last-changed"},
+                         "attributes": {"group_id": state.attributes.get('group_id', '')}}
+                      ],
+                      "exclude": [
+                        {"entity_id": "*_doh_block*"},
+                        {"state": "unavailable"}
+                      ]
+                    },
+                    "sort": {"method": "friendly_name"},
+                    "show_empty": false
+                  },
+                  {
+                    "type": "custom:auto-entities",
+                    "card": {"type": "entities", "title": "Devices"},
+                    "filter": {
+                      "include": [
+                        {"entity_id": "binary_sensor.firewalla_group_" ~ slug ~ "_*",
+                         "not": {"entity_id": "*_active$"},
+                         "options": {"secondary_info": "last-changed"}}
+                      ]
+                    },
+                    "sort": {"method": "friendly_name"},
+                    "show_empty": false
+                  }
+                ]
+              } %}
+              {% set ns.sections = ns.sections + [section] %}
+            {% endfor %}
+            {{ ns.sections }}

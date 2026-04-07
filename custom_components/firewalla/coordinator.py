@@ -198,15 +198,31 @@ def _build_groups(
         last_active = last_active_times.get(gid, 0)
         group["active"] = (now - last_active) < ACTIVITY_COOLDOWN
 
+    # Build user scope → group ID lookup for user-scoped rules (App Controls)
+    user_scope_to_group: dict[str, str] = {}
+    for user in users:
+        uid = user.get("id", "")
+        tag = user.get("affiliatedTag")
+        parts = uid.rsplit(":", 1)
+        if len(parts) == 2 and tag and tag in groups:
+            user_scope_to_group[parts[1]] = tag
+
     for rule_id, rule in rules.items():
         scope_type = rule.get("scope_type", "")
         scope_value = str(rule.get("scope_value", ""))
-        if scope_type != "group" or scope_value not in groups:
+
+        # Resolve group ID: group-scoped rules map directly,
+        # user-scoped rules (App Controls) map via user→group lookup
+        if scope_type == "group" and scope_value in groups:
+            gid = scope_value
+        elif scope_type == "user" and scope_value in user_scope_to_group:
+            gid = user_scope_to_group[scope_value]
+        else:
             continue
 
-        groups[scope_value]["rule_count"] += 1
+        groups[gid]["rule_count"] += 1
 
-        groups[scope_value]["group_rules"][rule_id] = {
+        groups[gid]["group_rules"][rule_id] = {
             "type": rule.get("type", ""),
             "value": rule.get("value", ""),
             "action": rule.get("action", ""),
@@ -216,8 +232,8 @@ def _build_groups(
         }
 
         if rule.get("type") == "internet" and rule.get("action") == "block":
-            groups[scope_value]["internet_block_rule_id"] = rule_id
-            groups[scope_value]["internet_blocked"] = not rule.get("paused", False)
+            groups[gid]["internet_block_rule_id"] = rule_id
+            groups[gid]["internet_blocked"] = not rule.get("paused", False)
 
     return groups
 

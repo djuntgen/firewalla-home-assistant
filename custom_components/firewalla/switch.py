@@ -173,8 +173,17 @@ async def async_setup_entry(
 
         current_ids = set(coordinator.data["rules"].keys())
 
-        # --- add entities for newly discovered rules ---
-        new_ids = current_ids - known_rule_ids
+        # Collect rule IDs already handled by group switches (internet + app controls)
+        group_rule_ids: set[str] = set()
+        if "groups" in coordinator.data:
+            for gdata in coordinator.data["groups"].values():
+                internet_rid = gdata.get("internet_block_rule_id")
+                if internet_rid:
+                    group_rule_ids.add(internet_rid)
+                group_rule_ids.update(gdata.get("group_rules", {}).keys())
+
+        # --- add entities for newly discovered rules (skip group-handled rules) ---
+        new_ids = current_ids - known_rule_ids - group_rule_ids
         if new_ids:
             new_entities: list[FirewallaRuleSwitch] = []
             for rid in new_ids:
@@ -514,13 +523,14 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
 
 
 class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
-    """Switch to control internet access for a Firewalla group.
+    """Switch to control internet block for a Firewalla group.
 
-    ON = internet is allowed (block rule is paused).
-    OFF = internet is blocked (block rule is active).
+    ON = block is active (internet blocked) — matches Firewalla "Block On".
+    OFF = block is paused (internet allowed) — matches Firewalla "Block Off".
     """
 
     _attr_has_entity_name = True
+    _attr_translation_key = "internet_block"
     _unrecorded_attributes = frozenset(
         {
             "group_id",
@@ -545,7 +555,7 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
             self.coordinator.data.get("rules", {}).get(rule_id, {}) if rule_id else {}
         )
         self._attr_unique_id = f"firewalla_group_{group_id}_internet"
-        self._attr_name = "Internet Access"
+        self._attr_name = "Internet"
         self._attr_icon = "mdi:web"
         self._attr_device_info = self._build_device_info()
 
@@ -570,7 +580,7 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
         group = self._get_group_data()
         if not group:
             return False
-        return not group.get("internet_blocked", False)
+        return group.get("internet_blocked", False)
 
     @property
     def available(self) -> bool:
@@ -599,27 +609,7 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        group = self._get_group_data()
-        if not group:
-            raise HomeAssistantError(f"Group {self._group_id} not found")
-        rule_id = group.get("internet_block_rule_id")
-        if not rule_id:
-            raise HomeAssistantError(
-                f"No internet block rule for group {self._group_id}"
-            )
-        success = await self.coordinator.async_pause_rule(rule_id)
-        if not success:
-            raise HomeAssistantError(
-                f"Failed to allow internet for group {group['name']}"
-            )
-        group["internet_blocked"] = False
-        rule = self.coordinator.data.get("rules", {}).get(rule_id)
-        if rule:
-            rule["paused"] = True
-            rule["status"] = "paused"
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn ON = activate block (resume the block rule)."""
         group = self._get_group_data()
         if not group:
             raise HomeAssistantError(f"Group {self._group_id} not found")
@@ -638,6 +628,28 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
         if rule:
             rule["paused"] = False
             rule["status"] = "active"
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn OFF = pause block (pause the block rule)."""
+        group = self._get_group_data()
+        if not group:
+            raise HomeAssistantError(f"Group {self._group_id} not found")
+        rule_id = group.get("internet_block_rule_id")
+        if not rule_id:
+            raise HomeAssistantError(
+                f"No internet block rule for group {self._group_id}"
+            )
+        success = await self.coordinator.async_pause_rule(rule_id)
+        if not success:
+            raise HomeAssistantError(
+                f"Failed to allow internet for group {group['name']}"
+            )
+        group["internet_blocked"] = False
+        rule = self.coordinator.data.get("rules", {}).get(rule_id)
+        if rule:
+            rule["paused"] = True
+            rule["status"] = "paused"
         self.async_write_ha_state()
 
 
