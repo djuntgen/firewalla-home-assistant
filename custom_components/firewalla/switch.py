@@ -544,10 +544,8 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
         rule = (
             self.coordinator.data.get("rules", {}).get(rule_id, {}) if rule_id else {}
         )
-        action = rule.get("action", "block").title()
-        target_type = rule.get("type", "internet").title()
         self._attr_unique_id = f"firewalla_group_{group_id}_internet"
-        self._attr_name = f"{action} {target_type}"
+        self._attr_name = "Internet Access"
         self._attr_icon = "mdi:web"
         self._attr_device_info = self._build_device_info()
 
