@@ -2,7 +2,7 @@
   <img src="custom_components/firewalla/icon.svg" alt="Firewalla for Home Assistant" width="200">
 </p>
 
-<h1 align="center">Firewalla for Home Assistant</h1>
+<h1 align="center">Firewalla Home Assistant Integration</h1>
 
 <p align="center">
   <a href="https://github.com/custom-components/hacs"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS"></a>
@@ -184,15 +184,17 @@ Firewalla represents time limits in two ways:
 
 Both are detected and surfaced as time limit sensors with `usage_percent` (capped at 100%).
 
-## Dashboard
+## Usage
 
-### Prerequisites
+### Dashboard
+
+#### Prerequisites
 
 Install from HACS:
 - **auto-entities** — auto-discovers entities by pattern
 - **entity-progress-card** — color-coded progress bars for time limits
 
-### Layout
+#### Layout
 
 The included dashboard template (`custom_components/firewalla/dashboard/firewalla_parental.yaml`) uses a per-user column layout:
 
@@ -203,7 +205,7 @@ The included dashboard template (`custom_components/firewalla/dashboard/firewall
 5. **Devices** — per-device online/offline with last-changed
 6. **Blocks** — content block toggles
 
-### Usage Examples
+### Automation Examples
 
 #### Activate Rules During Work Hours
 ```yaml

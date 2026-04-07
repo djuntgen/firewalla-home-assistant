@@ -1,10 +1,14 @@
 """Binary sensor platform for Firewalla user activity detection."""
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorDeviceClass
+from homeassistant.components.binary_sensor import (
+    BinarySensorEntity,
+    BinarySensorDeviceClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
@@ -24,7 +28,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Firewalla binary sensors: user activity + per-device online status."""
-    coordinator: FirewallaDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator: FirewallaDataUpdateCoordinator = hass.data[DOMAIN][
+        config_entry.entry_id
+    ]
     known_group_ids: set[str] = set()
     known_device_macs: set[str] = set()
 
@@ -35,16 +41,16 @@ async def async_setup_entry(
 
         # --- User activity sensors (one per user group) ---
         current_ids = {
-            gid for gid, gdata in coordinator.data["groups"].items()
+            gid
+            for gid, gdata in coordinator.data["groups"].items()
             if gdata.get("is_user_group")
         }
 
         new_ids = current_ids - known_group_ids
         if new_ids:
-            async_add_entities([
-                FirewallaUserActivitySensor(coordinator, gid)
-                for gid in new_ids
-            ])
+            async_add_entities(
+                [FirewallaUserActivitySensor(coordinator, gid) for gid in new_ids]
+            )
             known_group_ids.update(new_ids)
 
         removed_ids = known_group_ids - current_ids
@@ -109,7 +115,9 @@ class FirewallaUserActivitySensor(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 
-    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, group_id: str) -> None:
+    def __init__(
+        self, coordinator: FirewallaDataUpdateCoordinator, group_id: str
+    ) -> None:
         super().__init__(coordinator)
         self._group_id = group_id
         group = self._get_group_data()
@@ -139,7 +147,9 @@ class FirewallaUserActivitySensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self._get_group_data() is not None
+        return (
+            self.coordinator.last_update_success and self._get_group_data() is not None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -163,7 +173,9 @@ class FirewallaDeviceOnlineSensor(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
 
-    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, group_id: str, mac: str) -> None:
+    def __init__(
+        self, coordinator: FirewallaDataUpdateCoordinator, group_id: str, mac: str
+    ) -> None:
         super().__init__(coordinator)
         self._group_id = group_id
         self._mac = mac
@@ -201,7 +213,9 @@ class FirewallaDeviceOnlineSensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self._get_device_data() is not None
+        return (
+            self.coordinator.last_update_success and self._get_device_data() is not None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -215,6 +229,6 @@ class FirewallaDeviceOnlineSensor(CoordinatorEntity, BinarySensorEntity):
             "network": device.get("network", ""),
             "last_seen": device.get("last_seen"),
             "ip_reserved": device.get("ip_reserved", False),
-            "download_24h_mb": round(device.get("total_download", 0) / (1024 ** 2), 1),
-            "upload_24h_mb": round(device.get("total_upload", 0) / (1024 ** 2), 1),
+            "download_24h_mb": round(device.get("total_download", 0) / (1024**2), 1),
+            "upload_24h_mb": round(device.get("total_upload", 0) / (1024**2), 1),
         }

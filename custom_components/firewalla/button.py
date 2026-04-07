@@ -1,4 +1,5 @@
 """Button platform for Firewalla manual refresh."""
+
 from __future__ import annotations
 
 import logging
@@ -22,7 +23,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Firewalla refresh button."""
-    coordinator: FirewallaDataUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
+    coordinator: FirewallaDataUpdateCoordinator = hass.data[DOMAIN][
+        config_entry.entry_id
+    ]
     async_add_entities([FirewallaRefreshButton(coordinator)])
 
 
@@ -41,7 +44,9 @@ class FirewallaRefreshButton(CoordinatorEntity, ButtonEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info to link to the main Firewalla box device."""
-        box_info = self.coordinator.data.get("box_info", {}) if self.coordinator.data else {}
+        box_info = (
+            self.coordinator.data.get("box_info", {}) if self.coordinator.data else {}
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, self.coordinator.box_gid)},
             name=box_info.get("name", f"Firewalla Box {self.coordinator.box_gid[:8]}"),

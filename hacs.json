@@ -1,0 +1,7 @@
+{
+  "name": "Firewalla",
+  "render_readme": true,
+  "domains": ["switch", "sensor", "binary_sensor", "button"],
+  "iot_class": "cloud_polling",
+  "homeassistant": "2026.4.0"
+}

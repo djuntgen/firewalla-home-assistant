@@ -208,7 +208,9 @@ async def async_setup_entry(
 
         new_groups = current_groups - known_group_ids
         if new_groups:
-            group_entities = [FirewallaGroupInternetSwitch(coordinator, gid) for gid in new_groups]
+            group_entities = [
+                FirewallaGroupInternetSwitch(coordinator, gid) for gid in new_groups
+            ]
             async_add_entities(group_entities)
             known_group_ids.update(new_groups)
 
@@ -216,7 +218,9 @@ async def async_setup_entry(
         if removed_groups:
             ent_reg = er.async_get(hass)
             for gid in removed_groups:
-                entity_id = ent_reg.async_get_entity_id("switch", DOMAIN, f"firewalla_group_{gid}_internet")
+                entity_id = ent_reg.async_get_entity_id(
+                    "switch", DOMAIN, f"firewalla_group_{gid}_internet"
+                )
                 if entity_id:
                     ent_reg.async_remove(entity_id)
             known_group_ids.difference_update(removed_groups)
@@ -232,7 +236,10 @@ async def async_setup_entry(
 
         new_group_rules = current_group_rule_keys - known_group_rule_keys
         if new_group_rules:
-            new_entities = [FirewallaGroupRuleSwitch(coordinator, gid, rid) for gid, rid in new_group_rules]
+            new_entities = [
+                FirewallaGroupRuleSwitch(coordinator, gid, rid)
+                for gid, rid in new_group_rules
+            ]
             async_add_entities(new_entities)
             known_group_rule_keys.update(new_group_rules)
 
@@ -240,16 +247,16 @@ async def async_setup_entry(
         if removed_group_rules:
             ent_reg = er.async_get(hass)
             for gid, rid in removed_group_rules:
-                entity_id = ent_reg.async_get_entity_id("switch", DOMAIN, f"firewalla_group_{gid}_rule_{rid}")
+                entity_id = ent_reg.async_get_entity_id(
+                    "switch", DOMAIN, f"firewalla_group_{gid}_rule_{rid}"
+                )
                 if entity_id:
                     ent_reg.async_remove(entity_id)
             known_group_rule_keys.difference_update(removed_group_rules)
 
     # Perform the initial sync, then listen for coordinator updates.
     _async_update_entities()
-    config_entry.async_on_unload(
-        coordinator.async_add_listener(_async_update_entities)
-    )
+    config_entry.async_on_unload(coordinator.async_add_listener(_async_update_entities))
 
 
 # ---------------------------------------------------------------------------
@@ -514,19 +521,29 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
     """
 
     _attr_has_entity_name = True
-    _unrecorded_attributes = frozenset({
-        "group_id", "is_user_group", "user_id", "device_count",
-        "rule_count", "internet_block_rule_id",
-    })
+    _unrecorded_attributes = frozenset(
+        {
+            "group_id",
+            "is_user_group",
+            "user_id",
+            "device_count",
+            "rule_count",
+            "internet_block_rule_id",
+        }
+    )
 
-    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, group_id: str) -> None:
+    def __init__(
+        self, coordinator: FirewallaDataUpdateCoordinator, group_id: str
+    ) -> None:
         super().__init__(coordinator)
         self._group_id = group_id
         group = self._get_group_data()
         group_name = group["name"] if group else group_id
         # Derive name from the underlying rule's action + target type
         rule_id = group.get("internet_block_rule_id") if group else None
-        rule = self.coordinator.data.get("rules", {}).get(rule_id, {}) if rule_id else {}
+        rule = (
+            self.coordinator.data.get("rules", {}).get(rule_id, {}) if rule_id else {}
+        )
         action = rule.get("action", "block").title()
         target_type = rule.get("type", "internet").title()
         self._attr_unique_id = f"firewalla_group_{group_id}_internet"
@@ -589,10 +606,14 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
             raise HomeAssistantError(f"Group {self._group_id} not found")
         rule_id = group.get("internet_block_rule_id")
         if not rule_id:
-            raise HomeAssistantError(f"No internet block rule for group {self._group_id}")
+            raise HomeAssistantError(
+                f"No internet block rule for group {self._group_id}"
+            )
         success = await self.coordinator.async_pause_rule(rule_id)
         if not success:
-            raise HomeAssistantError(f"Failed to allow internet for group {group['name']}")
+            raise HomeAssistantError(
+                f"Failed to allow internet for group {group['name']}"
+            )
         group["internet_blocked"] = False
         rule = self.coordinator.data.get("rules", {}).get(rule_id)
         if rule:
@@ -606,10 +627,14 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
             raise HomeAssistantError(f"Group {self._group_id} not found")
         rule_id = group.get("internet_block_rule_id")
         if not rule_id:
-            raise HomeAssistantError(f"No internet block rule for group {self._group_id}")
+            raise HomeAssistantError(
+                f"No internet block rule for group {self._group_id}"
+            )
         success = await self.coordinator.async_resume_rule(rule_id)
         if not success:
-            raise HomeAssistantError(f"Failed to block internet for group {group['name']}")
+            raise HomeAssistantError(
+                f"Failed to block internet for group {group['name']}"
+            )
         group["internet_blocked"] = True
         rule = self.coordinator.data.get("rules", {}).get(rule_id)
         if rule:
@@ -627,9 +652,13 @@ class FirewallaGroupRuleSwitch(CoordinatorEntity, SwitchEntity):
     """Switch for a group-scoped block rule (category/app). ON=block active, OFF=block paused."""
 
     _attr_has_entity_name = True
-    _unrecorded_attributes = frozenset({"group_id", "rule_id", "rule_type", "target_value", "hit_count"})
+    _unrecorded_attributes = frozenset(
+        {"group_id", "rule_id", "rule_type", "target_value", "hit_count"}
+    )
 
-    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, group_id: str, rule_id: str) -> None:
+    def __init__(
+        self, coordinator: FirewallaDataUpdateCoordinator, group_id: str, rule_id: str
+    ) -> None:
         super().__init__(coordinator)
         self._group_id = group_id
         self._rule_id = rule_id
@@ -669,7 +698,9 @@ class FirewallaGroupRuleSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self._get_rule_info() is not None
+        return (
+            self.coordinator.last_update_success and self._get_rule_info() is not None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

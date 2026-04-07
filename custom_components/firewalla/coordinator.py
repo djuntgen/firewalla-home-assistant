@@ -51,19 +51,34 @@ def _format_schedule(schedule: dict | None) -> str | None:
 
     # Format time
     try:
-        time_str = f"{int(hour):02d}:{int(minute):02d}" if hour != "*" and minute != "*" else "every hour"
+        time_str = (
+            f"{int(hour):02d}:{int(minute):02d}"
+            if hour != "*" and minute != "*"
+            else "every hour"
+        )
     except ValueError:
         time_str = f"{hour}:{minute}"
 
     # Format days
-    day_map = {"0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat", "7": "Sun"}
+    day_map = {
+        "0": "Sun",
+        "1": "Mon",
+        "2": "Tue",
+        "3": "Wed",
+        "4": "Thu",
+        "5": "Fri",
+        "6": "Sat",
+        "7": "Sun",
+    }
     if dow == "*":
         day_str = "daily"
     else:
         days = [day_map.get(d.strip(), d.strip()) for d in dow.split(",")]
         if len(days) == 7:
             day_str = "daily"
-        elif len(days) == 5 and all(d in ["Mon", "Tue", "Wed", "Thu", "Fri"] for d in days):
+        elif len(days) == 5 and all(
+            d in ["Mon", "Tue", "Wed", "Thu", "Fri"] for d in days
+        ):
             day_str = "weekdays"
         elif len(days) == 2 and all(d in ["Sat", "Sun"] for d in days):
             day_str = "weekends"
@@ -131,19 +146,25 @@ def _build_groups(
 
         network_info = device.get("network", {})
         groups[gid]["device_count"] += 1
-        groups[gid]["devices"].append({
-            "name": device.get("name", "Unknown"),
-            "mac": device.get("id", ""),
-            "online": device.get("online", False),
-            "type": device.get("deviceType", ""),
-            "ip": device.get("ip", ""),
-            "total_download": device.get("totalDownload", 0),
-            "total_upload": device.get("totalUpload", 0),
-            "mac_vendor": device.get("macVendor", ""),
-            "last_seen": device.get("lastSeen"),
-            "ip_reserved": device.get("ipReserved", False),
-            "network": network_info.get("name", "") if isinstance(network_info, dict) else "",
-        })
+        groups[gid]["devices"].append(
+            {
+                "name": device.get("name", "Unknown"),
+                "mac": device.get("id", ""),
+                "online": device.get("online", False),
+                "type": device.get("deviceType", ""),
+                "ip": device.get("ip", ""),
+                "total_download": device.get("totalDownload", 0),
+                "total_upload": device.get("totalUpload", 0),
+                "mac_vendor": device.get("macVendor", ""),
+                "last_seen": device.get("lastSeen"),
+                "ip_reserved": device.get("ipReserved", False),
+                "network": (
+                    network_info.get("name", "")
+                    if isinstance(network_info, dict)
+                    else ""
+                ),
+            }
+        )
 
     # Compute download totals and activity per group.
     # Activity uses a 5-minute cooldown: once data flow is detected, the user
@@ -561,14 +582,20 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Configurable polling intervals
         self._base_poll_interval: int = max(30, base_poll_interval)
-        self._full_rules_interval: int = max(self._base_poll_interval, full_rules_interval)
+        self._full_rules_interval: int = max(
+            self._base_poll_interval, full_rules_interval
+        )
         self._devices_interval: int = max(self._base_poll_interval, devices_interval)
         self._users_cache_ttl: float = float(max(60, users_cache_ttl))
 
         # Derive poll-cycle counts from intervals
         # e.g. full_rules_interval=180, base=60 → full rules every 3 polls
-        self._full_rules_every: int = max(1, self._full_rules_interval // self._base_poll_interval)
-        self._devices_every: int = max(1, self._devices_interval // self._base_poll_interval)
+        self._full_rules_every: int = max(
+            1, self._full_rules_interval // self._base_poll_interval
+        )
+        self._devices_every: int = max(
+            1, self._devices_interval // self._base_poll_interval
+        )
 
         # Caching state
         self._cached_users: list = []
@@ -601,6 +628,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
             self._poll_count += 1
             import time as _time
+
             now = _time.time()
 
             # --- Split-polling for rules ---
@@ -634,19 +662,28 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             # Fetch devices at configurable interval (default every 2 polls = 60s)
             if self._poll_count % self._devices_every == 1 or not self._cached_devices:
                 devices_response = await self.api.get_devices()
-                self._cached_devices = devices_response if isinstance(devices_response, list) else []
+                self._cached_devices = (
+                    devices_response if isinstance(devices_response, list) else []
+                )
             devices_list = self._cached_devices
 
             # Cache users for configurable TTL (default 10 min)
-            if (now - self._users_last_fetched) > self._users_cache_ttl or not self._cached_users:
+            if (
+                now - self._users_last_fetched
+            ) > self._users_cache_ttl or not self._cached_users:
                 users_response = await self.api.get_users()
-                self._cached_users = users_response if isinstance(users_response, list) else []
+                self._cached_users = (
+                    users_response if isinstance(users_response, list) else []
+                )
                 self._users_last_fetched = now
             users_list = self._cached_users
 
             groups_data = _build_groups(
-                devices_list, users_list, rules_data,
-                self._previous_group_downloads, self._last_active_times,
+                devices_list,
+                users_list,
+                rules_data,
+                self._previous_group_downloads,
+                self._last_active_times,
             )
 
             # Update tracking state for next poll
@@ -912,8 +949,12 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
                 # Extract hit data
                 hit_info = rule_info.get("hit", {})
-                processed_rule["hit_count"] = hit_info.get("count", 0) if isinstance(hit_info, dict) else 0
-                processed_rule["last_hit"] = hit_info.get("lastHitTs") if isinstance(hit_info, dict) else None
+                processed_rule["hit_count"] = (
+                    hit_info.get("count", 0) if isinstance(hit_info, dict) else 0
+                )
+                processed_rule["last_hit"] = (
+                    hit_info.get("lastHitTs") if isinstance(hit_info, dict) else None
+                )
 
                 # Extract time usage (for timelimit rules)
                 time_usage = rule_info.get("timeUsage", {})
@@ -925,7 +966,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                     processed_rule["time_used_minutes"] = None
 
                 # Format schedule for display
-                processed_rule["schedule_display"] = _format_schedule(rule_info.get("schedule"))
+                processed_rule["schedule_display"] = _format_schedule(
+                    rule_info.get("schedule")
+                )
 
                 # Include all original fields
                 for key, value in rule_info.items():

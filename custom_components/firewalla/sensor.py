@@ -83,7 +83,10 @@ async def async_setup_entry(
 
             new_tl = current_tl_keys - known_time_limit_keys
             if new_tl:
-                new_sensors = [FirewallaTimeLimitSensor(coordinator, uid, rid) for uid, rid in new_tl]
+                new_sensors = [
+                    FirewallaTimeLimitSensor(coordinator, uid, rid)
+                    for uid, rid in new_tl
+                ]
                 async_add_entities(new_sensors)
                 known_time_limit_keys.update(new_tl)
 
@@ -91,7 +94,9 @@ async def async_setup_entry(
             if removed_tl:
                 ent_reg = er.async_get(hass)
                 for uid, rid in removed_tl:
-                    entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"firewalla_timelimit_{uid}_{rid}")
+                    entity_id = ent_reg.async_get_entity_id(
+                        "sensor", DOMAIN, f"firewalla_timelimit_{uid}_{rid}"
+                    )
                     if entity_id:
                         ent_reg.async_remove(entity_id)
                 known_time_limit_keys.difference_update(removed_tl)
@@ -107,8 +112,12 @@ async def async_setup_entry(
             if new_bw:
                 bw_sensors = []
                 for gid in new_bw:
-                    bw_sensors.append(FirewallaBandwidthSensor(coordinator, gid, "download"))
-                    bw_sensors.append(FirewallaBandwidthSensor(coordinator, gid, "upload"))
+                    bw_sensors.append(
+                        FirewallaBandwidthSensor(coordinator, gid, "download")
+                    )
+                    bw_sensors.append(
+                        FirewallaBandwidthSensor(coordinator, gid, "upload")
+                    )
                 async_add_entities(bw_sensors)
                 known_bandwidth_gids.update(new_bw)
 
@@ -117,13 +126,17 @@ async def async_setup_entry(
                 ent_reg = er.async_get(hass)
                 for gid in removed_bw:
                     for direction in ("download", "upload"):
-                        entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"firewalla_group_{gid}_{direction}")
+                        entity_id = ent_reg.async_get_entity_id(
+                            "sensor", DOMAIN, f"firewalla_group_{gid}_{direction}"
+                        )
                         if entity_id:
                             ent_reg.async_remove(entity_id)
                 known_bandwidth_gids.difference_update(removed_bw)
 
         _async_update_dynamic_sensors()
-        config_entry.async_on_unload(coordinator.async_add_listener(_async_update_dynamic_sensors))
+        config_entry.async_on_unload(
+            coordinator.async_add_listener(_async_update_dynamic_sensors)
+        )
 
     except KeyError as err:
         _LOGGER.error(
@@ -148,9 +161,13 @@ class FirewallaRulesSensor(CoordinatorEntity, SensorEntity):
     """Sensor entity for Firewalla rules summary and statistics."""
 
     _attr_has_entity_name = True
-    _unrecorded_attributes = frozenset({
-        "box_name", "box_model", "rules_by_type",
-    })
+    _unrecorded_attributes = frozenset(
+        {
+            "box_name",
+            "box_model",
+            "rules_by_type",
+        }
+    )
 
     def __init__(self, coordinator: FirewallaDataUpdateCoordinator) -> None:
         """Initialize the rules summary sensor."""
@@ -305,9 +322,16 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "min"
-    _unrecorded_attributes = frozenset({"user_scope_id", "rule_id", "user_id", "schedule"})
+    _unrecorded_attributes = frozenset(
+        {"user_scope_id", "rule_id", "user_id", "schedule"}
+    )
 
-    def __init__(self, coordinator: FirewallaDataUpdateCoordinator, user_scope_id: str, rule_id: str) -> None:
+    def __init__(
+        self,
+        coordinator: FirewallaDataUpdateCoordinator,
+        user_scope_id: str,
+        rule_id: str,
+    ) -> None:
         super().__init__(coordinator)
         self._user_scope_id = user_scope_id
         self._rule_id = rule_id
@@ -325,7 +349,7 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
         if group_data:
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"group_{affiliated_group}")},
-                name=group_data['name'],
+                name=group_data["name"],
                 manufacturer=DEVICE_MANUFACTURER,
                 model="Group",
                 via_device=(DOMAIN, coordinator.box_gid),
@@ -364,7 +388,9 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self._get_limit_data() is not None
+        return (
+            self.coordinator.last_update_success and self._get_limit_data() is not None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -380,7 +406,11 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
             "quota_minutes": limit.get("quota", 0),
             "used_minutes": limit.get("used", 0),
             "remaining_minutes": limit.get("remaining", 0),
-            "usage_percent": min(100, round(limit.get("used", 0) / limit["quota"] * 100)) if limit.get("quota") else 0,
+            "usage_percent": (
+                min(100, round(limit.get("used", 0) / limit["quota"] * 100))
+                if limit.get("quota")
+                else 0
+            ),
             "reached": limit.get("reached", False),
             "paused": limit.get("paused", False),
             "schedule": limit.get("schedule_display"),
@@ -427,11 +457,13 @@ class FirewallaBandwidthSensor(CoordinatorEntity, SensorEntity):
         if not group:
             return 0
         bytes_val = group.get(f"total_{self._direction}", 0)
-        return round(bytes_val / (1024 ** 3), 2)  # bytes to GB
+        return round(bytes_val / (1024**3), 2)  # bytes to GB
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self._get_group_data() is not None
+        return (
+            self.coordinator.last_update_success and self._get_group_data() is not None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -442,5 +474,5 @@ class FirewallaBandwidthSensor(CoordinatorEntity, SensorEntity):
         return {
             "group_id": self._group_id,
             "bytes": bytes_val,
-            "mb": round(bytes_val / (1024 ** 2), 1),
+            "mb": round(bytes_val / (1024**2), 1),
         }
