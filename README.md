@@ -138,31 +138,39 @@ Each Firewalla user group becomes an HA **device** named after the user (e.g., "
 
 ## Architecture
 
-```
-Home Assistant
-+-----------+  +----------+  +---------------+  +----------+
-| switch.py |  | sensor.py|  | binary_sensor |  | button.py|
-| RuleSwitch|  | Summary  |  | UserActivity  |  | Refresh  |
-| GroupInet |  | TimeLimit|  | DeviceOnline  |  |          |
-| GroupRule |  | Bandwidth|  |               |  |          |
-+-----+-----+  +----+-----+  +------+--------+  +----+-----+
-      |              |               |                |
-      +--------------+---------------+----------------+
-                     |
-          +----------v----------+
-          |   coordinator.py    |
-          | DataUpdateCoordinator|
-          |  + MSP API Client   |
-          +----------+----------+
-                     | HTTPS
-          +----------v----------+
-          | Firewalla MSP API v2|
-          | /v2/rules           |
-          | /v2/devices         |
-          | /v2/users           |
-          | /v2/rules/{id}/pause|
-          | /v2/rules/{id}/resume|
-          +---------------------+
+```mermaid
+graph TD
+    subgraph Home Assistant
+        subgraph Platforms
+            SW["switch.py<br/>RuleSwitch · GroupInet · GroupRule"]
+            SE["sensor.py<br/>Summary · TimeLimit · Bandwidth"]
+            BS["binary_sensor.py<br/>UserActivity · DeviceOnline"]
+            BT["button.py<br/>Refresh"]
+        end
+        CO["coordinator.py<br/>DataUpdateCoordinator + MSP API Client"]
+    end
+
+    SW --> CO
+    SE --> CO
+    BS --> CO
+    BT --> CO
+
+    CO -->|"HTTPS (split-polling)"| API
+
+    subgraph Firewalla Cloud
+        API["MSP API v2"]
+        R["/v2/rules"]
+        D["/v2/devices"]
+        U["/v2/users"]
+        P["/v2/rules/{id}/pause"]
+        RE["/v2/rules/{id}/resume"]
+    end
+
+    API --- R
+    API --- D
+    API --- U
+    API --- P
+    API --- RE
 ```
 
 ### Split-Polling Strategy
