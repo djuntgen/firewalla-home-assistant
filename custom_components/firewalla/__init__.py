@@ -76,7 +76,8 @@ def _build_user_section(name: str) -> dict:
                 "filter": {
                     "include": [
                         {
-                            "entity_id": f"sensor.firewalla_group_{slug}_{slug}_*_time",
+                            "entity_id": f"sensor.{slug}_*",
+                            "attributes": {"unit_of_measurement": "min"},
                             "options": {
                                 "type": "custom:entity-progress-card",
                                 "attribute": "usage_percent",
