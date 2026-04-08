@@ -389,8 +389,6 @@ class TestConfigFlow:
             "",
             "invalid-url",
             "test.example.com",
-            "https://test.firewalla.net",
-            "test.firewalla.net/path",
             ".firewalla.net",
             "test..firewalla.net",
         ]

@@ -1,9 +1,21 @@
-"""Integration tests using real Firewalla MSP API."""
+"""Integration tests using real Firewalla MSP API.
+
+These tests require real API credentials and network access.
+They are skipped in CI (detected via GITHUB_ACTIONS env var).
+"""
+
+import os
 
 import pytest
 import aiohttp
 import asyncio
 from typing import Dict, Any
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true"
+    or os.environ.get("CI") == "true",
+    reason="Real API tests require network access and valid credentials",
+)
 
 from custom_components.firewalla.coordinator import (
     FirewallaMSPClient,
