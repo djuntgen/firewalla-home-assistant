@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -337,7 +336,6 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
         self._rule_id = rule_id
         user_data = self._get_user_data()
         limit_data = self._get_limit_data()
-        user_name = user_data["user_name"] if user_data else f"User {user_scope_id}"
         app_name = (limit_data["app"] if limit_data else "unknown").title()
         self._attr_unique_id = f"firewalla_timelimit_{user_scope_id}_{rule_id}"
         self._attr_name = app_name

@@ -20,7 +20,6 @@ from .const import (
     DEVICE_MANUFACTURER,
     DEVICE_MODEL_MAPPINGS,
     DOMAIN,
-    RULE_ACTIONS,
     RULE_ATTRIBUTES,
     RULE_TYPES,
 )
@@ -547,13 +546,6 @@ class FirewallaGroupInternetSwitch(CoordinatorEntity, SwitchEntity):
     ) -> None:
         super().__init__(coordinator)
         self._group_id = group_id
-        group = self._get_group_data()
-        group_name = group["name"] if group else group_id
-        # Derive name from the underlying rule's action + target type
-        rule_id = group.get("internet_block_rule_id") if group else None
-        rule = (
-            self.coordinator.data.get("rules", {}).get(rule_id, {}) if rule_id else {}
-        )
         self._attr_unique_id = f"firewalla_group_{group_id}_internet"
         self._attr_name = "Internet"
         self._attr_icon = "mdi:web"

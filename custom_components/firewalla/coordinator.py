@@ -25,7 +25,6 @@ from .const import (
     MSP_API_V2_BASE,
     RETRY_ATTEMPTS,
     RETRY_DELAYS,
-    UPDATE_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -467,7 +466,7 @@ class FirewallaMSPClient:
                                 "MSP API returned non-JSON error response: %s", text
                             )
                             raise HomeAssistantError(
-                                f"MSP API returned invalid response format"
+                                "MSP API returned invalid response format"
                             )
 
             except asyncio.TimeoutError:

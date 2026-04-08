@@ -18,7 +18,6 @@ from typing import Any, Dict, Optional
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -40,7 +39,6 @@ from .const import (
     DEFAULT_MSP_URL_FORMAT,
     DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
-    ERROR_MESSAGES,
 )
 from .coordinator import FirewallaMSPClient
 
@@ -347,7 +345,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._available_boxes = {
                     "default": {
                         "gid": "default",
-                        "name": f"Firewalla Box",
+                        "name": "Firewalla Box",
                         "model": "Unknown",
                         "online": True,
                     }

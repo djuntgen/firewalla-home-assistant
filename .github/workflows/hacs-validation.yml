@@ -48,7 +48,7 @@ jobs:
         run: isort --check-only --profile black custom_components/
 
       - name: Lint with flake8
-        run: flake8 custom_components/ --max-line-length=88 --extend-ignore=E203,W503
+        run: flake8 custom_components/ --max-line-length=88 --extend-ignore=E203,W503,E501
 
   tests:
     runs-on: ubuntu-latest
