@@ -25,10 +25,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_ACCESS_TOKEN,
-    CONF_BOX_GID,
-    CONF_DEVICES_INTERVAL,
     CONF_BASE_POLL_INTERVAL,
+    CONF_BOX_GID,
     CONF_DASHBOARD_USERS,
+    CONF_DEVICES_INTERVAL,
     CONF_EXCLUDE_FILTERS,
     CONF_FULL_RULES_INTERVAL,
     CONF_INCLUDE_FILTERS,
