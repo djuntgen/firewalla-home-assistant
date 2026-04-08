@@ -76,6 +76,7 @@ class TestAsyncSetupEntry:
             unique_id="test_incomplete",
             options={},
             discovery_keys={},
+            subentries_data={},
         )
 
         with pytest.raises(
@@ -568,6 +569,7 @@ class TestEndToEndIntegration:
             unique_id="box-gid-1",
             options={},
             discovery_keys={},
+            subentries_data={},
         )
 
         config_entry_2 = ConfigEntry(
@@ -585,6 +587,7 @@ class TestEndToEndIntegration:
             unique_id="box-gid-2",
             options={},
             discovery_keys={},
+            subentries_data={},
         )
 
         mock_coordinator_1 = AsyncMock()

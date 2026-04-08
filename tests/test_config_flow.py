@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
-from homeassistant import config_entries, data_entry_flow
+from homeassistant import config_entries
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.core import HomeAssistant
 
 from custom_components.firewalla.config_flow import (
@@ -63,7 +64,7 @@ class TestConfigFlow:
 
         result = await flow.async_step_user()
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "user"
         assert CONF_MSP_URL in result["data_schema"].schema
         assert CONF_ACCESS_TOKEN in result["data_schema"].schema
@@ -81,7 +82,7 @@ class TestConfigFlow:
             }
         )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"][CONF_MSP_URL] == "invalid_url_format"
 
     @pytest.mark.asyncio
@@ -97,7 +98,7 @@ class TestConfigFlow:
             }
         )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"][CONF_ACCESS_TOKEN] == "auth_failed"
 
     @pytest.mark.asyncio
@@ -113,7 +114,7 @@ class TestConfigFlow:
             }
         )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"][CONF_ACCESS_TOKEN] == "auth_failed"
 
     @pytest.mark.asyncio
@@ -152,7 +153,7 @@ class TestConfigFlow:
                 }
             )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
+        assert result["type"] == FlowResultType.CREATE_ENTRY
         assert result["title"] == "Firewalla Gold"
         assert result["data"][CONF_MSP_URL] == "test.firewalla.net"
         assert result["data"][CONF_ACCESS_TOKEN] == "test_token_123"
@@ -187,7 +188,7 @@ class TestConfigFlow:
                 }
             )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "box_selection"
 
     @pytest.mark.asyncio
@@ -212,7 +213,7 @@ class TestConfigFlow:
                 }
             )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"]["base"] == "no_boxes"
 
     @pytest.mark.asyncio
@@ -231,7 +232,7 @@ class TestConfigFlow:
                 }
             )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"]["base"] == "auth_failed"
 
     @pytest.mark.asyncio
@@ -250,7 +251,7 @@ class TestConfigFlow:
                 }
             )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"]["base"] == "connection_failed"
 
     @pytest.mark.asyncio
@@ -280,7 +281,7 @@ class TestConfigFlow:
                 }
             )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"]["base"] == "rule_access_failed"
 
     @pytest.mark.asyncio
@@ -298,7 +299,7 @@ class TestConfigFlow:
         )
 
         # Check that the token is preserved in the form
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         schema_dict = {str(key): key.default() for key in result["data_schema"].schema}
         assert schema_dict[CONF_ACCESS_TOKEN] == "test_token_123"
 
@@ -318,7 +319,7 @@ class TestConfigFlow:
 
         result = await flow.async_step_box_selection()
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "box_selection"
         assert CONF_BOX_GID in result["data_schema"].schema
 
@@ -345,7 +346,7 @@ class TestConfigFlow:
                 }
             )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
+        assert result["type"] == FlowResultType.CREATE_ENTRY
         assert result["title"] == "Firewalla Gold"
         assert result["data"][CONF_BOX_GID] == "box-123"
 
@@ -364,7 +365,7 @@ class TestConfigFlow:
             }
         )
 
-        assert result["type"] == data_entry_flow.RESULT_TYPE_FORM
+        assert result["type"] == FlowResultType.FORM
         assert result["errors"]["base"] == "no_boxes"
 
     def test_validate_msp_url_valid(self):
@@ -437,7 +438,9 @@ class TestConfigFlow:
         ) as mock_client_class:
             mock_client = MagicMock()
             mock_client.authenticate = AsyncMock(
-                side_effect=aiohttp.ClientConnectorError(None, None)
+                side_effect=aiohttp.ClientConnectorError(
+                    connection_key=MagicMock(), os_error=OSError(111, "Connection refused")
+                )
             )
             mock_client_class.return_value = mock_client
 
