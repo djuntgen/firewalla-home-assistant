@@ -59,7 +59,7 @@ def _build_user_section(name: str) -> dict:
                 "entity": f"switch.firewalla_group_{slug}_{slug}_internet_access",
                 "name": "Internet",
                 "vertical": True,
-                "color": "red",
+                "color": "blue",
             },
             {
                 "type": "history-graph",
@@ -133,7 +133,7 @@ def _build_user_section(name: str) -> dict:
                             "options": {
                                 "type": "tile",
                                 "vertical": True,
-                                "color": "red",
+                                "color": "blue",
                             },
                         },
                         {
@@ -141,7 +141,7 @@ def _build_user_section(name: str) -> dict:
                             "options": {
                                 "type": "tile",
                                 "vertical": True,
-                                "color": "red",
+                                "color": "blue",
                             },
                         },
                     ],
