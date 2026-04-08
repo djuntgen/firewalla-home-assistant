@@ -1,76 +1,98 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## v1.1.0 (2026-04-05)
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+### New Features
 
-## [1.0.0] - 2024-12-19
+- **Groups and parental controls**
+  - Per-group internet control switch, named dynamically from API (`action` + `target.type`)
+  - Per-group rule switches for category/app blocks, named from API data
+  - Per-user time limit sensors for app-specific limits (YouTube, Facebook, etc.)
+  - Internet time limit detection — captures group-scoped block rules with `timeUsage` data
+  - `usage_percent` attribute on time limit sensors (capped at 100%)
+  - Each group becomes its own HA device, named from the Firewalla user name
 
-### Added
-- Initial release of Firewalla Home Assistant integration
-- MSP API client with comprehensive error handling and retry logic
-- Configuration flow for MSP setup with device discovery
-- Internet blocking switch entities for device control
-- Gaming pause switch entities with smart device detection
-- Device status sensor entities with rich attributes
-- Rules count sensor entity for monitoring active rules
-- Comprehensive unit tests with HACS quality standards
-- Full HACS compatibility and documentation
-- Automatic device discovery and selection
-- Rate limiting and intelligent caching
-- Robust error handling and recovery mechanisms
-- Localization support with user-friendly messages
+- **Per-user bandwidth sensors**
+  - 24h download and upload in GB per user group
+  - Attributes: bytes, MB values
 
-### Features
-- **Device Control**: Block/unblock internet access for individual devices
-- **Gaming Management**: Pause/resume gaming for gaming-capable devices
-- **Device Monitoring**: Real-time online/offline status tracking
-- **Rules Management**: Track and manage integration-created rules
-- **Smart Detection**: Automatic identification of gaming devices
-- **Error Recovery**: Automatic retry with exponential backoff
-- **API Integration**: Full Firewalla MSP API integration
-- **HACS Support**: Full HACS compatibility for easy installation
+- **Per-device online sensors**
+  - Binary sensor for each device in user groups
+  - Attributes: IP, MAC vendor, network, last seen, IP reserved, 24h bandwidth
 
-### Technical Details
-- Minimum Home Assistant version: 2023.1.0
-- Python 3.10+ compatibility
-- Async/await throughout for optimal performance
-- Type hints for better code quality
-- Comprehensive logging for debugging
-- Extensive test coverage (>95%)
+- **User activity detection**
+  - Binary sensor with 10 KB threshold and 5-minute cooldown
+  - Prevents flapping from background keep-alive traffic
 
-### Requirements
-- Firewalla MSP (Managed Service Provider) account
-- Personal Access Token from MSP account
-- Firewalla device accessible via MSP API
-- Home Assistant 2023.1.0 or later
+- **Dynamic entity naming**
+  - All entity names derived from Firewalla API data
+  - No hardcoded English strings — users override via HA friendly_name
+  - Device names use group/user name directly (no "Firewalla Group:" prefix)
 
-### Known Limitations
-- Requires MSP API access (not available for all Firewalla users)
-- Gaming device detection based on device class and naming patterns
-- API rate limits may affect rapid state changes
-- Rules are managed per-device (not per-application)
+- **Split-polling optimization**
+  - Time limit rules fetched every base poll (~5.5 KB payload)
+  - Full rules fetched at configurable interval (~55 KB payload)
+  - ~85% bandwidth reduction on the rules endpoint
 
-### Breaking Changes
-- None (initial release)
+- **Configurable polling intervals**
+  - Base poll interval (default 45s, range 30-300s) — controls how often time limits update
+  - Full rules refresh interval (default 300s, range 60-900s) — all rule data
+  - Devices refresh interval (default 600s, range 60-600s) — online status, bandwidth, activity
+  - Users cache TTL (default 1800s, range 60-3600s) — user/group names
+  - Configured via Settings > Integrations > Firewalla > Configure
+  - ~1.7 API calls/min at defaults (82% of Firewalla's 3,000/day limit)
 
-### Migration Notes
-- None (initial release)
+- **Manual refresh button**
+  - On-demand full data refresh from the Firewalla device page
+  - Clears cached data and triggers immediate API fetch
 
-## [Unreleased]
+- **Reconfigure flow**
+  - Update MSP domain and access token without deleting the integration
+  - Settings > Integrations > Firewalla > 3-dot menu > Reconfigure
 
-### Planned Features
-- Support for additional rule types (category blocking, time-based rules)
-- Enhanced gaming device detection algorithms
-- Integration with Firewalla's alarm system
-- Support for multiple Firewalla devices in single integration
-- Advanced scheduling and automation features
-- Performance optimizations and caching improvements
+- **HA 2026.4 compatibility**
+  - `config_entry` passed to `DataUpdateCoordinator` (required by newer HA)
+  - `OptionsFlow` updated for read-only `config_entry` property
 
-### Under Consideration
-- Direct API support (non-MSP) for broader compatibility
-- Mobile app integration for remote control
-- Advanced reporting and analytics
-- Integration with other security platforms
-- Custom rule templates and presets
+- **Complete API target types**
+  - Added `net` (Network CIDR), `remotePort` (Remote Port) to type mappings
+  - `resumeTs` (auto-resume timestamp) surfaced in rule switch attributes
+
+- **Dynamic entity lifecycle**
+  - Entities auto-add/remove when Firewalla rules, groups, or devices change
+  - No reload needed
+
+- **Optimistic state updates**
+  - UI reflects toggles immediately, confirmed on next poll
+
+- **Enriched rule data**
+  - `hit_count`, `last_hit`, `time_quota_minutes`, `time_used_minutes`
+  - `schedule_display` — human-readable schedule
+  - `scope_type`, `scope_value`, `direction`, `resumeTs`
+
+- **Parental control dashboard**
+  - Per-user columns with activity, internet, bandwidth, time limits, devices, blocks
+  - Uses tile cards, entity-progress-card, and auto-entities
+  - Time limit progress bars with color thresholds (green/orange/red)
+
+### Bug Fixes
+
+- Fixed `unpause` to `resume` API endpoint (Firewalla uses POST `/v2/rules/{id}/resume`)
+- Fixed closure bug in switch dynamic entity lifecycle (`set -=` to `set.difference_update()`)
+- Fixed duplicate internet block entities per group (filter by type, not single rule ID)
+- Fixed entity name slug drift ("Time Left" to "Time" to prevent HA regenerating entity IDs)
+- Fixed `OptionsFlow.__init__` for HA 2026.4 (read-only `config_entry` property)
+- Fixed `DataUpdateCoordinator` missing `config_entry` parameter for HA 2026.4
+- Capped `usage_percent` at 100 (used can exceed quota after limit reached)
+
+## v1.0.0 (2026-04-03)
+
+### Initial Release
+
+- Rule discovery from Firewalla MSP API v2
+- Per-rule switch entities (pause/resume)
+- Rules summary sensor
+- Two-step config flow (MSP credentials + box selection)
+- Include/exclude rule filters
+- Retry with exponential backoff
+- Rate limit (429) handling

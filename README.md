@@ -2,6 +2,7 @@
   <img src="custom_components/firewalla/icon.png" alt="Firewalla for Home Assistant" width="200">
 </p>
 
+<!-- # Firewalla Home Assistant Integration -->
 <h1 align="center">Firewalla Home Assistant Integration</h1>
 
 <p align="center">
