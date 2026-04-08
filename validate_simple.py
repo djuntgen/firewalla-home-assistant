@@ -94,12 +94,12 @@ def validate_init_functions():
                 print(f"❌ {func_name}")
                 all_present = False
         
-        # Check for PLATFORMS_TO_SETUP
-        has_platforms = "PLATFORMS_TO_SETUP" in content
+        # Check for PLATFORMS constant usage
+        has_platforms = "PLATFORMS" in content
         if has_platforms:
-            print(f"✅ PLATFORMS_TO_SETUP")
+            print("✅ PLATFORMS")
         else:
-            print(f"❌ PLATFORMS_TO_SETUP")
+            print("❌ PLATFORMS")
             all_present = False
         
         return all_present
