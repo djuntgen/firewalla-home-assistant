@@ -124,26 +124,11 @@ def _build_user_section(name: str) -> dict:
             },
             {
                 "type": "custom:auto-entities",
-                "card": {"type": "grid", "title": "Blocks", "columns": 2},
-                "card_param": "cards",
+                "card": {"type": "entities", "title": "Blocks"},
                 "filter": {
                     "include": [
-                        {
-                            "entity_id": f"switch.firewalla_group_{slug}_{slug}_*_block",
-                            "options": {
-                                "type": "tile",
-                                "vertical": True,
-                                "color": "blue",
-                            },
-                        },
-                        {
-                            "entity_id": f"switch.{slug}_block_*",
-                            "options": {
-                                "type": "tile",
-                                "vertical": True,
-                                "color": "blue",
-                            },
-                        },
+                        {"entity_id": f"switch.firewalla_group_{slug}_{slug}_*_block"},
+                        {"entity_id": f"switch.{slug}_block_*"},
                     ],
                     "exclude": [
                         {"entity_id": "*_doh_block*"},
