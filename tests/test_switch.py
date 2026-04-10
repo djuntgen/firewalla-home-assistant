@@ -189,32 +189,32 @@ class TestGenerateCleanEntityId:
     def test_removes_block_prefix(self):
         """Action prefix 'block' should be stripped from the entity id."""
         result = _generate_clean_entity_id("Block Internet Access", "rule-1")
-        assert result == "internet_access"
+        assert result == "internet_access_2d05e1"
 
     def test_removes_allow_prefix(self):
         result = _generate_clean_entity_id("Allow Internet Access", "rule-1")
-        assert result == "internet_access"
+        assert result == "internet_access_2d05e1"
 
     def test_removes_limit_prefix(self):
         result = _generate_clean_entity_id("Limit Youtube", "rule-1")
-        assert result == "youtube"
+        assert result == "youtube_2d05e1"
 
     def test_truncates_long_names(self):
-        """Names exceeding 40 characters should be truncated."""
+        """Names exceeding 40 characters should be truncated, plus 7-char hash suffix."""
         long_name = "Block " + "a" * 60
         result = _generate_clean_entity_id(long_name, "rule-1")
-        assert len(result) <= 40
+        assert len(result) <= 47
 
     def test_falls_back_for_short_names(self):
         """Very short cleaned names get replaced with rule_<prefix>."""
         result = _generate_clean_entity_id("Block ab", "rule-xyz-123")
         # After removing "block ", we have "ab" which is <3 chars
-        assert result == "rule_rule"
+        assert result == "rule_rule_c9e1f4"
 
     def test_special_characters_replaced(self):
         """Non-alphanumeric characters become underscores."""
         result = _generate_clean_entity_id("Block foo.bar/baz", "rule-1")
-        assert result == "foo_bar_baz"
+        assert result == "foo_bar_baz_2d05e1"
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +230,8 @@ class TestMakeUniqueId:
         coordinator = _make_coordinator()
         uid = _make_unique_id(coordinator, "rule-123")
         # description is "Block internet during study time"
-        # clean_entity_id strips "block " -> "internet_during_study_time"
-        assert uid == "firewalla_rule_internet_during_study_time"
+        # clean_entity_id strips "block " -> "internet_during_study_time_112169"
+        assert uid == "firewalla_rule_internet_during_study_time_112169"
 
     def test_falls_back_when_rule_missing(self):
         """Should use rule_<id> when rule not in coordinator data."""

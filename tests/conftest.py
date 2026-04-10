@@ -34,7 +34,6 @@ def mock_config_entry():
         unique_id="test_box_gid_456",
         options={},
         discovery_keys={},
-        subentries_data={},
     )
 
 
@@ -149,6 +148,7 @@ def mock_hass():
     # Ensure async methods are properly mocked as coroutines
     hass.config_entries.async_forward_entry_setups = AsyncMock(return_value=True)
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+    hass.config_entries.async_reload = AsyncMock(return_value=None)
     return hass
 
 

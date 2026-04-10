@@ -76,7 +76,6 @@ class TestAsyncSetupEntry:
             unique_id="test_incomplete",
             options={},
             discovery_keys={},
-            subentries_data={},
         )
 
         with pytest.raises(
@@ -304,78 +303,23 @@ class TestAsyncReloadEntry:
     """Test integration reload."""
 
     @pytest.mark.asyncio
-    async def test_reload_entry_success(self, mock_hass, mock_config_entry):
-        """Test successful integration reload."""
-        with patch(
-            "custom_components.firewalla.async_unload_entry", return_value=True
-        ), patch("custom_components.firewalla.async_setup_entry", return_value=True):
+    async def test_reload_entry_calls_async_reload(self, mock_hass, mock_config_entry):
+        """Test that reload delegates to hass.config_entries.async_reload."""
+        await async_reload_entry(mock_hass, mock_config_entry)
 
+        mock_hass.config_entries.async_reload.assert_called_once_with(
+            mock_config_entry.entry_id
+        )
+
+    @pytest.mark.asyncio
+    async def test_reload_entry_propagates_exceptions(self, mock_hass, mock_config_entry):
+        """Test that exceptions from async_reload propagate to the caller."""
+        mock_hass.config_entries.async_reload = AsyncMock(
+            side_effect=Exception("Reload failed")
+        )
+
+        with pytest.raises(Exception, match="Reload failed"):
             await async_reload_entry(mock_hass, mock_config_entry)
-
-            # Should complete without raising exceptions
-
-    @pytest.mark.asyncio
-    async def test_reload_entry_unload_failure(self, mock_hass, mock_config_entry):
-        """Test reload with unload failure."""
-        with patch(
-            "custom_components.firewalla.async_unload_entry", return_value=False
-        ), patch("custom_components.firewalla.async_setup_entry", return_value=True):
-
-            # Should still proceed with setup even if unload wasn't fully successful
-            await async_reload_entry(mock_hass, mock_config_entry)
-
-    @pytest.mark.asyncio
-    async def test_reload_entry_setup_failure(self, mock_hass, mock_config_entry):
-        """Test reload with setup failure."""
-        with patch(
-            "custom_components.firewalla.async_unload_entry", return_value=True
-        ), patch("custom_components.firewalla.async_setup_entry", return_value=False):
-
-            with pytest.raises(
-                HomeAssistantError, match="Failed to set up rule management integration during reload"
-            ):
-                await async_reload_entry(mock_hass, mock_config_entry)
-
-    @pytest.mark.asyncio
-    async def test_reload_entry_auth_failure(self, mock_hass, mock_config_entry):
-        """Test reload with authentication failure."""
-        with patch(
-            "custom_components.firewalla.async_unload_entry", return_value=True
-        ), patch(
-            "custom_components.firewalla.async_setup_entry",
-            side_effect=ConfigEntryAuthFailed("Auth failed"),
-        ):
-
-            with pytest.raises(ConfigEntryAuthFailed):
-                await async_reload_entry(mock_hass, mock_config_entry)
-
-    @pytest.mark.asyncio
-    async def test_reload_entry_not_ready(self, mock_hass, mock_config_entry):
-        """Test reload with config entry not ready."""
-        with patch(
-            "custom_components.firewalla.async_unload_entry", return_value=True
-        ), patch(
-            "custom_components.firewalla.async_setup_entry",
-            side_effect=ConfigEntryNotReady("Not ready"),
-        ):
-
-            with pytest.raises(ConfigEntryNotReady):
-                await async_reload_entry(mock_hass, mock_config_entry)
-
-    @pytest.mark.asyncio
-    async def test_reload_entry_unexpected_error(self, mock_hass, mock_config_entry):
-        """Test reload with unexpected error."""
-        with patch(
-            "custom_components.firewalla.async_unload_entry", return_value=True
-        ), patch(
-            "custom_components.firewalla.async_setup_entry",
-            side_effect=Exception("Unexpected error"),
-        ):
-
-            with pytest.raises(
-                HomeAssistantError, match="Failed to reload Firewalla rule management integration"
-            ):
-                await async_reload_entry(mock_hass, mock_config_entry)
 
 
 class TestSetupIntegrationLogging:
@@ -476,36 +420,27 @@ class TestEndToEndIntegration:
     async def test_integration_reload_preserves_functionality(
         self, mock_hass, mock_config_entry
     ):
-        """Test that integration reload maintains all functionality."""
-        # Mock successful setup and unload - use side_effect to return different coordinators
-        mock_coordinator_1 = AsyncMock()
-        mock_coordinator_1.async_config_entry_first_refresh = AsyncMock()
-        mock_coordinator_1.data = {"rule_count": {"total": 5, "active": 3, "paused": 2}}
-
-        mock_coordinator_2 = AsyncMock()
-        mock_coordinator_2.async_config_entry_first_refresh = AsyncMock()
-        mock_coordinator_2.data = {"rule_count": {"total": 5, "active": 3, "paused": 2}}
+        """Test that integration reload delegates to hass.config_entries.async_reload."""
+        mock_coordinator = AsyncMock()
+        mock_coordinator.async_config_entry_first_refresh = AsyncMock()
+        mock_coordinator.data = {"rule_count": {"total": 5, "active": 3, "paused": 2}}
 
         with patch(
             "custom_components.firewalla.FirewallaDataUpdateCoordinator",
-            side_effect=[mock_coordinator_1, mock_coordinator_2],
+            return_value=mock_coordinator,
         ), patch("custom_components.firewalla.async_get_clientsession"):
 
             # Initial setup
             setup_result = await async_setup_entry(mock_hass, mock_config_entry)
             assert setup_result is True
 
-            # Store reference to initial coordinator
-            initial_coordinator = mock_hass.data[DOMAIN][mock_config_entry.entry_id]
-
-            # Reload
+            # Reload delegates to HA's built-in reload mechanism
             await async_reload_entry(mock_hass, mock_config_entry)
 
-            # Verify new coordinator was created and stored
-            reloaded_coordinator = mock_hass.data[DOMAIN][mock_config_entry.entry_id]
-            assert reloaded_coordinator is not None
-            # Should be a new instance after reload
-            assert reloaded_coordinator != initial_coordinator
+            # Verify async_reload was called with the correct entry_id
+            mock_hass.config_entries.async_reload.assert_called_once_with(
+                mock_config_entry.entry_id
+            )
 
     @pytest.mark.asyncio
     async def test_integration_handles_platform_failures_gracefully(
@@ -569,7 +504,6 @@ class TestEndToEndIntegration:
             unique_id="box-gid-1",
             options={},
             discovery_keys={},
-            subentries_data={},
         )
 
         config_entry_2 = ConfigEntry(
@@ -587,7 +521,6 @@ class TestEndToEndIntegration:
             unique_id="box-gid-2",
             options={},
             discovery_keys={},
-            subentries_data={},
         )
 
         mock_coordinator_1 = AsyncMock()
