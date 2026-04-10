@@ -427,43 +427,7 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     _LOGGER.info(
         "Reloading Firewalla rule management integration for entry %s", entry.entry_id
     )
-
-    try:
-        # Unload the entry first
-        _LOGGER.debug("Unloading entry before reload")
-        unload_success = await async_unload_entry(hass, entry)
-
-        if not unload_success:
-            _LOGGER.warning(
-                "Unload was not fully successful, proceeding with setup anyway"
-            )
-
-        # Set up the entry again
-        _LOGGER.debug("Setting up entry after unload")
-        setup_success = await async_setup_entry(hass, entry)
-
-        if setup_success:
-            _LOGGER.info("Successfully reloaded Firewalla rule management integration")
-        else:
-            _LOGGER.error(
-                "Failed to set up Firewalla rule management integration during reload"
-            )
-            raise HomeAssistantError(
-                "Failed to set up rule management integration during reload"
-            )
-
-    except (ConfigEntryAuthFailed, ConfigEntryNotReady) as err:
-        _LOGGER.error("Configuration error during Firewalla reload: %s", err)
-        # Re-raise config errors as-is
-        raise
-
-    except Exception as err:
-        _LOGGER.exception(
-            "Unexpected error reloading Firewalla rule management integration: %s", err
-        )
-        raise HomeAssistantError(
-            f"Failed to reload Firewalla rule management integration: {err}"
-        ) from err
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 def setup_integration_logging() -> None:

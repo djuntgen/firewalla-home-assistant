@@ -36,7 +36,11 @@ _ACTION_PREFIXES: dict[str, str] = {
 
 
 def _generate_clean_entity_id(entity_name: str, rule_id: str) -> str:
-    """Generate a clean, deterministic entity ID fragment from a rule name."""
+    """Generate a clean, deterministic entity ID fragment from a rule name.
+
+    Appends a short hash of the rule_id to guarantee uniqueness — multiple
+    groups can have identically-named rules (e.g. "Internet Access").
+    """
     clean_id = entity_name.lower()
 
     # Remove common prefixes to keep IDs shorter.
@@ -54,7 +58,11 @@ def _generate_clean_entity_id(entity_name: str, rule_id: str) -> str:
         rule_id_short = rule_id.split("-")[0] if "-" in rule_id else rule_id[:8]
         clean_id = f"rule_{rule_id_short}"
 
-    return clean_id
+    # Always append a short rule_id suffix to prevent collisions across groups
+    import hashlib
+
+    suffix = hashlib.md5(rule_id.encode()).hexdigest()[:6]
+    return f"{clean_id}_{suffix}"
 
 
 def _make_unique_id(coordinator: FirewallaDataUpdateCoordinator, rule_id: str) -> str:

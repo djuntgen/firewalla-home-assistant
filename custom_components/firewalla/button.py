@@ -54,8 +54,11 @@ class FirewallaRefreshButton(CoordinatorEntity, ButtonEntity):
         )
 
     async def async_press(self) -> None:
-        """Handle the button press — trigger a full coordinator refresh."""
-        _LOGGER.debug("Manual refresh triggered")
-        # Force a full rules refresh on the next poll by resetting the cache
+        """Handle the button press — trigger a full refresh of all MSP API data."""
+        _LOGGER.debug("Manual refresh triggered — clearing all caches")
         self.coordinator._cached_full_rules = {}
+        self.coordinator._cached_devices = []
+        self.coordinator._cached_users = []
+        self.coordinator._users_last_fetched = 0
+        self.coordinator._poll_count = 0
         await self.coordinator.async_request_refresh()
