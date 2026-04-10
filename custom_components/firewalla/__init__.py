@@ -61,9 +61,26 @@ def _build_user_section(name: str) -> dict:
                 "color": "blue",
             },
             {
+                "type": "glance",
+                "title": "Data Transferred",
+                "show_state": True,
+                "show_name": True,
+                "entities": [
+                    {
+                        "entity": f"sensor.{slug}_upload",
+                        "name": "Upload",
+                        "icon": "mdi:arrow-up-bold",
+                    },
+                    {
+                        "entity": f"sensor.{slug}_download",
+                        "name": "Download",
+                        "icon": "mdi:arrow-down-bold",
+                    },
+                ],
+            },
+            {
                 "type": "history-graph",
-                "title": "Bandwidth (8h)",
-                "hours_to_show": 8,
+                "hours_to_show": 1,
                 "entities": [
                     {"entity": f"sensor.{slug}_download", "name": "Download"},
                     {"entity": f"sensor.{slug}_upload", "name": "Upload"},
@@ -160,7 +177,13 @@ async def _async_generate_dashboard(hass: HomeAssistant, dashboard_users: str) -
                     {
                         "type": "entity",
                         "entity": "button.firewalla_refresh",
-                        "tap_action": {"action": "toggle"},
+                        "tap_action": {
+                            "action": "perform-action",
+                            "perform_action": "button.press",
+                            "target": {
+                                "entity_id": "button.firewalla_refresh",
+                            },
+                        },
                     },
                     {
                         "type": "entity",
@@ -173,17 +196,35 @@ async def _async_generate_dashboard(hass: HomeAssistant, dashboard_users: str) -
     }
 
     try:
-        await hass.services.async_call(
-            "lovelace",
-            "save_config",
-            {"url_path": DASHBOARD_URL_PATH, "config": config},
-            blocking=True,
-        )
+        # Use the lovelace websocket API to save dashboard config
+        connection = hass.helpers.frame.get_current_frame  # noqa: not needed
+        await hass.data["lovelace"]["dashboards"][DASHBOARD_URL_PATH].async_save(config)
         _LOGGER.info(
             "Generated parental control dashboard for %d users: %s",
             len(users),
             ", ".join(users),
         )
+    except (KeyError, AttributeError):
+        # Dashboard doesn't exist yet — try the service call as fallback
+        try:
+            await hass.services.async_call(
+                "lovelace",
+                "save_config",
+                {"url_path": DASHBOARD_URL_PATH, "config": config},
+                blocking=True,
+            )
+            _LOGGER.info(
+                "Generated parental control dashboard for %d users: %s",
+                len(users),
+                ", ".join(users),
+            )
+        except Exception as err:
+            _LOGGER.warning(
+                "Could not generate dashboard — create '%s' dashboard in "
+                "Settings > Dashboards first, then reload the integration: %s",
+                DASHBOARD_URL_PATH,
+                err,
+            )
     except Exception as err:
         _LOGGER.warning(
             "Could not generate dashboard (create '%s' dashboard manually first): %s",
