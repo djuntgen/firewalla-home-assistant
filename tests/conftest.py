@@ -34,6 +34,7 @@ def mock_config_entry():
         unique_id="test_box_gid_456",
         options={},
         discovery_keys={},
+        subentries_data={},
     )
 
 

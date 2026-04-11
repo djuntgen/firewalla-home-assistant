@@ -1003,6 +1003,39 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Processed %d valid rules", len(processed_rules))
         return processed_rules
 
+    def _describe_rule(self, rule: Dict[str, Any]) -> str:
+        """Build a human-readable description of a rule for logging."""
+        action = rule.get("action", "block")
+        target_type = rule.get("type", "unknown")
+        target_value = rule.get("target_name") or rule.get("value") or rule.get("target", "")
+        scope_type = rule.get("scope_type", "")
+        scope_value = rule.get("scope_value", "")
+
+        # Resolve scope to a friendly name
+        scope_desc = ""
+        if scope_type in ("group", "user") and scope_value:
+            groups = self.data.get("groups", {}) if self.data else {}
+            # Match by group ID key, user_id, or name
+            if scope_value in groups:
+                scope_desc = groups[scope_value].get("name", scope_value)
+            else:
+                for gdata in groups.values():
+                    if gdata.get("user_id") == scope_value:
+                        scope_desc = gdata["name"]
+                        break
+            if not scope_desc:
+                scope_desc = scope_value
+
+        parts = [action.title(), target_type.title()]
+        if target_value:
+            parts.append(f'"{target_value.title()}"')
+        if scope_desc:
+            parts.append(f"for {scope_desc}")
+        elif scope_type:
+            parts.append(f"({scope_type})")
+
+        return " ".join(parts)
+
     def _detect_rule_changes(self, current_rules: Dict[str, Any]) -> Dict[str, Any]:
         """Compare current rules with previous rules to detect changes."""
         changes = {
@@ -1027,7 +1060,6 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                 current_rule = current_rules[rule_id]
                 previous_rule = self._previous_rules[rule_id]
 
-                # Check if rule state or metadata changed
                 if (
                     current_rule.get("paused") != previous_rule.get("paused")
                     or current_rule.get("disabled") != previous_rule.get("disabled")
@@ -1036,9 +1068,39 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                 ):
                     changes["modified"].append(rule_id)
 
+        # Log detailed change information
+        for rule_id in changes["added"]:
+            rule = current_rules.get(rule_id, {})
+            _LOGGER.info("Rule added: %s [%s]", self._describe_rule(rule), rule_id)
+
+        for rule_id in changes["removed"]:
+            rule = self._previous_rules.get(rule_id, {})
+            _LOGGER.info("Rule removed: %s [%s]", self._describe_rule(rule), rule_id)
+
+        for rule_id in changes["modified"]:
+            current_rule = current_rules.get(rule_id, {})
+            previous_rule = self._previous_rules.get(rule_id, {})
+            desc = self._describe_rule(current_rule)
+
+            # Describe what changed
+            detail_parts = []
+            if current_rule.get("paused") != previous_rule.get("paused"):
+                if current_rule.get("paused"):
+                    detail_parts.append("paused")
+                else:
+                    detail_parts.append("resumed")
+            if current_rule.get("disabled") != previous_rule.get("disabled"):
+                if current_rule.get("disabled"):
+                    detail_parts.append("disabled")
+                else:
+                    detail_parts.append("enabled")
+
+            detail = ", ".join(detail_parts) if detail_parts else "modified"
+            _LOGGER.info("Rule %s: %s [%s]", detail, desc, rule_id)
+
         if any(changes.values()):
             _LOGGER.debug(
-                "Rule changes detected: %d added, %d removed, %d modified",
+                "Rule changes summary: %d added, %d removed, %d modified",
                 len(changes["added"]),
                 len(changes["removed"]),
                 len(changes["modified"]),
