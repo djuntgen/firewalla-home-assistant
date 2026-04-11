@@ -1007,7 +1007,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         """Build a human-readable description of a rule for logging."""
         action = rule.get("action", "block")
         target_type = rule.get("type", "unknown")
-        target_value = rule.get("target_name") or rule.get("value") or rule.get("target", "")
+        target_value = (
+            rule.get("target_name") or rule.get("value") or rule.get("target", "")
+        )
         scope_type = rule.get("scope_type", "")
         scope_value = rule.get("scope_value", "")
 
