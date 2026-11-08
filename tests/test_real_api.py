@@ -312,7 +312,7 @@ class TestRealFirewallaMSPAPI:
         # Test with invalid domain
         invalid_domain_client = FirewallaMSPClient(
             session=real_api_session,
-            msp_domain="invalid.firewalla.net",
+            msp_domain="firewalla.invalid",
             access_token="invalid_token_123",
         )
 
