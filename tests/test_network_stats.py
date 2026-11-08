@@ -65,13 +65,14 @@ def api():
         yield m
 
 
-def _coordinator(session):
+def _coordinator(session, **options):
     coord = FirewallaDataUpdateCoordinator(
         hass=MagicMock(),
         session=session,
         msp_domain="box.firewalla.invalid",
         access_token="test-token",
         box_gid=BOX,
+        **options,
     )
     coord.api._authenticated = True
     return coord
@@ -139,23 +140,35 @@ async def test_box_offline(session, api):
     assert online.is_on is False
 
 
-async def test_flow_trends_fetched_at_most_every_15_minutes(session, api):
+async def test_api_calls_at_default_options(session, api):
+    """Boxes only on device-list refresh polls; trends at most every 15 min."""
     api.get(f"{BASE}/boxes", payload=[BOX_RECORD], repeat=True)
     api.get(f"{BASE}/trends/flows", payload=TRENDS)
     api.get(f"{BASE}/trends/flows", payload=[{"ts": 1793595600, "value": 400}])
-    coord = _coordinator(session)
+    coord = _coordinator(session)  # defaults: base 45 s, devices 600 s
     t0 = 1_000_000.0
+    polls = 27  # 0 .. 1170 s
 
-    for offset in (0, 45, 90, FLOW_TRENDS_INTERVAL - 1):
-        data = await _poll(coord, t0 + offset)
-        # The last value is kept between fetches.
-        assert data["box_stats"]["blocked_flows"]["value"] == 345
-    assert _requests(api, "/trends/flows") == 1
-    assert _requests(api, "/boxes") == 4  # box stats come with every poll
+    box_polls, device_polls, trend_polls, values = [], [], [], []
+    for n in range(polls):
+        before = {p: _requests(api, p) for p in ("/boxes", "/devices", "/trends")}
+        data = await _poll(coord, t0 + n * 45)
+        after = {p: _requests(api, p) for p in before}
+        if after["/boxes"] > before["/boxes"]:
+            box_polls.append(n)
+        if after["/devices"] > before["/devices"]:
+            device_polls.append(n)
+        if after["/trends"] > before["/trends"]:
+            trend_polls.append(n)
+        values.append(data["box_stats"]["blocked_flows"]["value"])
 
-    data = await _poll(coord, t0 + FLOW_TRENDS_INTERVAL)
-    assert _requests(api, "/trends/flows") == 2
-    assert data["box_stats"]["blocked_flows"]["value"] == 400
+    assert device_polls == [0, 13, 26]  # every 600 // 45 = 13 polls
+    assert box_polls == device_polls
+    assert trend_polls == [0, 20]  # t = 0 s and t = 900 s
+    # The last box and trends values are kept between fetches.
+    assert values[:20] == [345] * 20
+    assert values[20:] == [400] * 7
+    assert _requests(api, "/boxes") == 3  # vs. 27 polls
 
 
 async def test_stats_failure_leaves_rules_working(session, api, caplog):
@@ -164,7 +177,8 @@ async def test_stats_failure_leaves_rules_working(session, api, caplog):
     api.get(f"{BASE}/boxes", status=500, body="boom")
     api.get(f"{BASE}/boxes", payload=[BOX_RECORD])
     api.get(f"{BASE}/trends/flows", payload=TRENDS, repeat=True)
-    coord = _coordinator(session)
+    # Devices (and so boxes) refresh every 2 polls: polls 1, 3 and 5.
+    coord = _coordinator(session, base_poll_interval=45, devices_interval=90)
     # A real rule, so we can see rules still update.
     coord.api.get_rules = MagicMock(side_effect=_rules_response)
 
@@ -176,10 +190,14 @@ async def test_stats_failure_leaves_rules_working(session, api, caplog):
         assert not any(entity.available for entity in e.values())
         assert sensor.FirewallaRulesSensor(coord).available is True
 
-        await _poll(coord, 1_000_045.0)  # still failing
-        data = await _poll(coord, 1_000_090.0)  # recovered
+        for n in range(1, 4):  # poll 3 fails again; polls 2 and 4 don't refetch
+            data = await _poll(coord, 1_000_000.0 + n * 45)
+            assert data["box_stats"] is None
+            assert "r1" in data["rules"]
+        data = await _poll(coord, 1_000_000.0 + 4 * 45)  # poll 5: recovered
         assert data["box_stats"]["alarm_count"] == 470
         assert all(entity.available for entity in _entities(coord).values())
+        assert _requests(api, "/boxes") == 3
 
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert [r.getMessage() for r in warnings] == [
@@ -285,7 +303,7 @@ async def test_stats_timeout_is_one_quiet_attempt(session, api, caplog):
         for at in (1_000_000.0, 1_000_045.0):
             data = await _poll(coord, at)
             assert data["box_stats"] is None
-    assert _requests(api, "/boxes") == 2  # no retries
+    assert _requests(api, "/boxes") == 1  # one attempt, no retries; not refetched
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert len(warnings) == 1
     assert warnings[0].getMessage().startswith("Could not fetch Firewalla box")

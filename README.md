@@ -151,7 +151,8 @@ Bandwidth is the sum of the group's devices' download/upload over the last 24 ho
 
 The box status entities sit on the Firewalla box's HA device and come from the MSP API's box record (`/v2/boxes`), the device list and the daily trends (`/v2/trends/flows`):
 
-- **Online devices** counts only devices connected to the configured box. It comes from the device list, so it refreshes at the **Devices Refresh** interval (default 10 min); the other box values refresh every base poll.
+- **Online devices** counts only devices connected to the configured box.
+- **Update rate:** the box status entities, including box online, update at the **Devices Refresh** interval (default 10 min, set in the integration's options), together with the device list, so they can lag by up to that interval. Blocked flows today updates at most every 15 minutes.
 - **Alarms** is the box's `alarmCount` as the MSP reports it. Firewalla doesn't document whether that excludes archived alarms, so it is not labelled "active".
 - **Blocked flows today** is Firewalla's latest daily point: flows blocked since midnight in the **box's** timezone (`day_start_ts` is that midnight as a Unix timestamp). Firewalla only reports this account-wide (or per box group), so the sensor is created only when the MSP account has exactly one box; with more boxes the number wouldn't be this box's.
 - If these calls fail, only these entities go unavailable; rules and the other entities keep updating.
@@ -216,7 +217,7 @@ The integration uses split-polling to minimize API calls while keeping time-sens
 | All rules | Configurable (default 5 min) | ~55 KB | Block/allow status, hit counts, schedules — changes rarely |
 | Devices | Configurable (default 10 min) | ~45 KB | Online/offline, IPs, bandwidth, activity detection |
 | Users | Configurable (default 30 min) | ~2 KB | User/group names — almost never changes |
-| Box status | Every base poll (default 45s) | one record per box | Box online, public IP, firmware, total devices, alarms (Online devices comes from the device list, at the Devices interval) |
+| Box status | With the device list (default 10 min) | one record per box | Box online, public IP, firmware, total devices, alarms |
 | Blocked-flow trends | At most every 15 min | ~30 daily points | Blocked flows today |
 
 ### Time Limit Detection

@@ -636,6 +636,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Box status/statistics (#13). Failures only affect the box-stats entities.
         self._box_stats_failing: bool = False
+        self._cached_box: dict[str, Any] | None = None
+        self._box_count: int = 0
         self._flow_trends_failing: bool = False
         self._flow_trends_last_attempt: float | None = None
         self._blocked_flows: dict[str, Any] | None = None
@@ -696,7 +698,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             rule_stats = self._calculate_rule_statistics(rules_data)
 
             # Fetch devices at configurable interval (default every 2 polls = 60s)
-            if self._poll_count % self._devices_every == 1 or not self._cached_devices:
+            refresh_devices = (
+                self._poll_count % self._devices_every == 1 or not self._cached_devices
+            )
+            if refresh_devices:
                 devices_response = await self.api.get_devices()
                 self._cached_devices = (
                     devices_response if isinstance(devices_response, list) else []
@@ -730,7 +735,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
             time_limits_data = _build_time_limits(users_list, rules_data)
 
-            box_stats = await self._async_fetch_box_stats(devices_list, now)
+            box_stats = await self._async_fetch_box_stats(
+                devices_list, now, refresh_box=refresh_devices
+            )
 
             processed_data = {
                 "rules": rules_data,
@@ -776,35 +783,21 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             ) from err
 
     async def _async_fetch_box_stats(
-        self, devices: list, now: float
+        self, devices: list, now: float, refresh_box: bool
     ) -> Dict[str, Any] | None:
-        """Fetch status and statistics for the configured box.
+        """Status and statistics for the configured box.
 
+        ``/v2/boxes`` is fetched only when ``refresh_box`` is set (the polls that
+        refetch the device list), and the last result is reused in between.
         Returns None when the box can't be fetched. A failure here never fails
         the poll: it is logged once (until it recovers) and only the box-stats
-        entities become unavailable.
+        entities become unavailable until the next device-list refresh.
         """
-        try:
-            async with asyncio.timeout(BOX_STATS_TIMEOUT):
-                boxes = await self.api.get_boxes()
-            box = next(
-                (
-                    b
-                    for b in (boxes if isinstance(boxes, list) else [])
-                    if isinstance(b, dict) and b.get("gid") == self.box_gid
-                ),
-                None,
-            )
-            if box is None:
-                raise HomeAssistantError(f"box {self.box_gid} not in /v2/boxes")
-        except Exception as err:  # noqa: BLE001 — must not break rule updates
-            if not self._box_stats_failing:
-                _LOGGER.warning("Could not fetch Firewalla box statistics: %s", err)
-                self._box_stats_failing = True
+        if refresh_box:
+            self._cached_box = await self._async_fetch_box()
+        box = self._cached_box
+        if box is None:
             return None
-        if self._box_stats_failing:
-            _LOGGER.info("Firewalla box statistics are available again")
-            self._box_stats_failing = False
 
         # Daily trends change slowly: fetch at most every FLOW_TRENDS_INTERVAL
         # and keep the last value in between.
@@ -825,9 +818,36 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             "device_count": box.get("deviceCount"),
             "online_devices": sum(1 for d in box_devices if d.get("online")),
             "alarm_count": box.get("alarmCount"),
-            "box_count": len(boxes),
+            "box_count": self._box_count,
             "blocked_flows": self._blocked_flows,
         }
+
+    async def _async_fetch_box(self) -> Dict[str, Any] | None:
+        """Fetch the configured box's record from /v2/boxes, or None on failure."""
+        try:
+            async with asyncio.timeout(BOX_STATS_TIMEOUT):
+                boxes = await self.api.get_boxes()
+            boxes = boxes if isinstance(boxes, list) else []
+            box = next(
+                (
+                    b
+                    for b in boxes
+                    if isinstance(b, dict) and b.get("gid") == self.box_gid
+                ),
+                None,
+            )
+            if box is None:
+                raise HomeAssistantError(f"box {self.box_gid} not in /v2/boxes")
+        except Exception as err:  # noqa: BLE001 — must not break rule updates
+            if not self._box_stats_failing:
+                _LOGGER.warning("Could not fetch Firewalla box statistics: %s", err)
+                self._box_stats_failing = True
+            return None
+        if self._box_stats_failing:
+            _LOGGER.info("Firewalla box statistics are available again")
+            self._box_stats_failing = False
+        self._box_count = len(boxes)
+        return box
 
     async def _async_fetch_blocked_flows(self) -> Dict[str, Any] | None:
         """Return the latest daily blocked-flow count, or None on failure."""
