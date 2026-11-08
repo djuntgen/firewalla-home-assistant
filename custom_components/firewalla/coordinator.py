@@ -650,6 +650,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             config_entry=config_entry,
         )
 
+    def _is_refresh_poll(self, every: int) -> bool:
+        """True on poll 1 and every ``every``-th poll after it (every >= 1)."""
+        return (self._poll_count - 1) % every == 0
+
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch rule data from MSP API with automatic rule change detection."""
         _LOGGER.debug("Starting MSP API data update for box %s", self.box_gid)
@@ -670,10 +674,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             now = _time.time()
 
             # --- Split-polling for rules ---
-            # Full rules: fetched at configurable interval (default every 6 polls = 3 min)
-            # Timelimit-only: fetched every poll (30s) and merged into cached full rules
+            # Full rules: fetched at configurable interval (default every 6 polls)
+            # Timelimit-only: fetched on the other polls and merged into cached full rules
             is_full_rules_poll = (
-                self._poll_count % self._full_rules_every == 1
+                self._is_refresh_poll(self._full_rules_every)
                 or not self._cached_full_rules
             )
 
@@ -697,9 +701,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             # Calculate rule statistics
             rule_stats = self._calculate_rule_statistics(rules_data)
 
-            # Fetch devices at configurable interval (default every 2 polls = 60s)
+            # Fetch devices at configurable interval (default every 13 polls)
             refresh_devices = (
-                self._poll_count % self._devices_every == 1 or not self._cached_devices
+                self._is_refresh_poll(self._devices_every) or not self._cached_devices
             )
             if refresh_devices:
                 devices_response = await self.api.get_devices()
@@ -800,8 +804,9 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             return None
 
         # Daily trends change slowly: fetch at most every FLOW_TRENDS_INTERVAL
-        # and keep the last value in between.
-        if (
+        # and keep the last value in between. Only single-box accounts get the
+        # blocked-flows sensor (trends are account-wide), so skip it otherwise.
+        if self._box_count == 1 and (
             self._flow_trends_last_attempt is None
             or now - self._flow_trends_last_attempt >= FLOW_TRENDS_INTERVAL
         ):
