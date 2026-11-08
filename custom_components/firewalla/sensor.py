@@ -100,12 +100,10 @@ async def async_setup_entry(
                         ent_reg.async_remove(entity_id)
                 known_time_limit_keys.difference_update(removed_tl)
 
-            # --- Bandwidth sensors (per user group) ---
+            # --- Bandwidth sensors (per group: user groups and device groups) ---
             current_bw_gids: set[str] = set()
             if coordinator.data and "groups" in coordinator.data:
-                for gid, gdata in coordinator.data["groups"].items():
-                    if gdata.get("is_user_group"):
-                        current_bw_gids.add(gid)
+                current_bw_gids = set(coordinator.data["groups"])
 
             new_bw = current_bw_gids - known_bandwidth_gids
             if new_bw:
@@ -417,7 +415,11 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
 
 
 class FirewallaBandwidthSensor(CoordinatorEntity, SensorEntity):
-    """Sensor showing 24h bandwidth usage per user group."""
+    """Sensor showing 24h bandwidth usage per group (user or device group).
+
+    The value is the sum of the group's devices' ``totalDownload`` /
+    ``totalUpload``, which the MSP API defines as bytes for the last 24 hours.
+    """
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DATA_SIZE

@@ -1,4 +1,4 @@
-"""Binary sensor platform for Firewalla user activity detection."""
+"""Binary sensor platform for Firewalla group activity and device online status."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -22,29 +23,29 @@ from .coordinator import FirewallaDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
+def _device_unique_id(mac: str) -> str:
+    return f"firewalla_device_{mac.replace(':', '_')}"
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Firewalla binary sensors: user activity + per-device online status."""
+    """Set up Firewalla binary sensors: group activity + per-device online status."""
     coordinator: FirewallaDataUpdateCoordinator = hass.data[DOMAIN][
         config_entry.entry_id
     ]
     known_group_ids: set[str] = set()
-    known_device_macs: set[str] = set()
+    known_device_groups: dict[str, str] = {}  # device MAC -> group ID
 
     @callback
     def _async_update_binary_sensors():
         if not coordinator.data or "groups" not in coordinator.data:
             return
 
-        # --- User activity sensors (one per user group) ---
-        current_ids = {
-            gid
-            for gid, gdata in coordinator.data["groups"].items()
-            if gdata.get("is_user_group")
-        }
+        # --- Activity sensors (one per group: user groups and device groups) ---
+        current_ids = set(coordinator.data["groups"])
 
         new_ids = current_ids - known_group_ids
         if new_ids:
@@ -64,44 +65,62 @@ async def async_setup_entry(
                     ent_reg.async_remove(entity_id)
             known_group_ids.difference_update(removed_ids)
 
-        # --- Per-device online sensors (for user group devices) ---
-        current_macs: set[str] = set()
+        # --- Per-device online sensors (devices in any group) ---
+        current_device_groups: dict[str, str] = {}
         for gid, gdata in coordinator.data["groups"].items():
-            if not gdata.get("is_user_group"):
-                continue
             for device in gdata.get("devices", []):
                 mac = device.get("mac", "")
                 if mac:
-                    current_macs.add(mac)
+                    current_device_groups[mac] = gid
 
-        new_macs = current_macs - known_device_macs
-        if new_macs:
-            new_entities = []
-            for mac in new_macs:
-                # Find which group this device belongs to
-                for gid, gdata in coordinator.data["groups"].items():
-                    for device in gdata.get("devices", []):
-                        if device.get("mac") == mac:
-                            new_entities.append(
-                                FirewallaDeviceOnlineSensor(coordinator, gid, mac)
-                            )
-                            break
-                    else:
-                        continue
-                    break
-            async_add_entities(new_entities)
-            known_device_macs.update(new_macs)
-
-        removed_macs = known_device_macs - current_macs
+        removed_macs = known_device_groups.keys() - current_device_groups.keys()
         if removed_macs:
             ent_reg = er.async_get(hass)
             for mac in removed_macs:
                 entity_id = ent_reg.async_get_entity_id(
-                    "binary_sensor", DOMAIN, f"firewalla_device_{mac.replace(':', '_')}"
+                    "binary_sensor", DOMAIN, _device_unique_id(mac)
                 )
                 if entity_id:
                     ent_reg.async_remove(entity_id)
-            known_device_macs.difference_update(removed_macs)
+                del known_device_groups[mac]
+
+        # A device that moved to another group keeps its entity (and any user
+        # customisation); the sensor finds its data by MAC, and here its registry
+        # entry is moved to the new group's HA device. If that HA device doesn't
+        # exist yet (a group first seen in this poll), retry on the next poll.
+        moved_macs = {
+            mac
+            for mac, gid in known_device_groups.items()
+            if mac in current_device_groups and current_device_groups[mac] != gid
+        }
+        if moved_macs:
+            ent_reg = er.async_get(hass)
+            dev_reg = dr.async_get(hass)
+            for mac in moved_macs:
+                new_gid = current_device_groups[mac]
+                group_device = dev_reg.async_get_device(
+                    identifiers={(DOMAIN, f"group_{new_gid}")}
+                )
+                entity_id = ent_reg.async_get_entity_id(
+                    "binary_sensor", DOMAIN, _device_unique_id(mac)
+                )
+                if group_device is None or entity_id is None:
+                    continue
+                ent_reg.async_update_entity(entity_id, device_id=group_device.id)
+                known_device_groups[mac] = new_gid
+
+        new_macs = current_device_groups.keys() - known_device_groups.keys()
+        if new_macs:
+            async_add_entities(
+                [
+                    FirewallaDeviceOnlineSensor(
+                        coordinator, current_device_groups[mac], mac
+                    )
+                    for mac in new_macs
+                ]
+            )
+            for mac in new_macs:
+                known_device_groups[mac] = current_device_groups[mac]
 
     _async_update_binary_sensors()
     config_entry.async_on_unload(
@@ -110,7 +129,12 @@ async def async_setup_entry(
 
 
 class FirewallaUserActivitySensor(CoordinatorEntity, BinarySensorEntity):
-    """Binary sensor detecting active internet usage for a Firewalla user group."""
+    """Binary sensor detecting active internet usage for a Firewalla group.
+
+    Used for user groups and device groups. The unique ID keeps its original
+    ``firewalla_user_`` prefix so existing entities, and a device group that later
+    gets a user, keep the same ID.
+    """
 
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
@@ -139,7 +163,7 @@ class FirewallaUserActivitySensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        """ON when data is actively flowing for this user's devices."""
+        """ON when data is actively flowing for this group's devices."""
         group = self._get_group_data()
         if not group:
             return False
@@ -183,7 +207,7 @@ class FirewallaDeviceOnlineSensor(CoordinatorEntity, BinarySensorEntity):
         device_name = device["name"] if device else mac
         group = coordinator.data["groups"].get(group_id, {}) if coordinator.data else {}
         group_name = group.get("name", group_id)
-        self._attr_unique_id = f"firewalla_device_{mac.replace(':', '_')}"
+        self._attr_unique_id = _device_unique_id(mac)
         self._attr_name = device_name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"group_{group_id}")},
@@ -196,12 +220,11 @@ class FirewallaDeviceOnlineSensor(CoordinatorEntity, BinarySensorEntity):
     def _get_device_data(self) -> dict[str, Any] | None:
         if not self.coordinator.data or "groups" not in self.coordinator.data:
             return None
-        group = self.coordinator.data["groups"].get(self._group_id)
-        if not group:
-            return None
-        for device in group.get("devices", []):
-            if device.get("mac") == self._mac:
-                return device
+        # Search every group: the device may have moved since this entity was made.
+        for group in self.coordinator.data["groups"].values():
+            for device in group.get("devices", []):
+                if device.get("mac") == self._mac:
+                    return device
         return None
 
     @property
