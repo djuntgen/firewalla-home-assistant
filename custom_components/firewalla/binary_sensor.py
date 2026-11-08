@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DEVICE_MANUFACTURER, DOMAIN
 from .coordinator import FirewallaDataUpdateCoordinator
+from .sensor import box_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +37,8 @@ async def async_setup_entry(
     coordinator: FirewallaDataUpdateCoordinator = hass.data[DOMAIN][
         config_entry.entry_id
     ]
+    async_add_entities([FirewallaBoxOnlineSensor(coordinator)])
+
     known_group_ids: set[str] = set()
     known_device_groups: dict[str, str] = {}  # device MAC -> group ID
 
@@ -255,3 +258,30 @@ class FirewallaDeviceOnlineSensor(CoordinatorEntity, BinarySensorEntity):
             "download_24h_mb": round(device.get("total_download", 0) / (1024**2), 1),
             "upload_24h_mb": round(device.get("total_upload", 0) / (1024**2), 1),
         }
+
+
+class FirewallaBoxOnlineSensor(CoordinatorEntity, BinarySensorEntity):
+    """Whether the configured Firewalla box is online, as reported by the MSP."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Online"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    def __init__(self, coordinator: FirewallaDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"firewalla_box_{coordinator.box_gid}_online"
+        self._attr_device_info = box_device_info(coordinator)
+
+    def _box_stats(self) -> dict[str, Any] | None:
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.get("box_stats")
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._box_stats() is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        stats = self._box_stats()
+        return stats["online"] if stats is not None else None

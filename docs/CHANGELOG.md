@@ -5,6 +5,7 @@
 ### New Features
 
 - **Device groups get their devices** — Firewalla device groups (groups with no user) now appear in HA like user groups: an online sensor for each member device, plus the group's activity and 24h download/upload sensors. Before, a device group showed up only when it had rules, and then without its devices. Existing entity IDs are unchanged, and a device that moves between groups keeps its entity ([#11](https://github.com/djuntgen/firewalla-home-assistant/issues/11))
+- **Box status and statistics** — new entities on the Firewalla box device: box online, public IP and firmware version (diagnostic), total devices, online devices, alarms, and blocked flows today (single-box accounts; counted in the box's local day). The firmware version also shows as the box device's firmware. Failures in these calls only make these entities unavailable. WAN speed/state and allowed-flow counts aren't in the Firewalla MSP API, so they aren't included ([#13](https://github.com/djuntgen/firewalla-home-assistant/issues/13))
 
 ### Bug Fixes
 

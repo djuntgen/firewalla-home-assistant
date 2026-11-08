@@ -87,6 +87,7 @@ async def test_binary_sensors_for_user_and_device_groups(hass):
         "firewalla_user_25_active",
         "firewalla_device_BB_BB_BB_BB_BB_01",
         "firewalla_device_BB_BB_BB_BB_BB_02",
+        "firewalla_box_box-gid_online",  # box status (#13), not per group
     }
     by_id = {e.unique_id: e for e in platform.added}
     assert by_id["firewalla_device_BB_BB_BB_BB_BB_01"].is_on is True
@@ -100,7 +101,7 @@ async def test_binary_sensors_for_user_and_device_groups(hass):
 
     # A second poll with the same data adds nothing.
     platform.poll(_devices())
-    assert len(platform.added) == 5
+    assert len(platform.added) == 6
 
 
 async def test_bandwidth_sensors_for_user_and_device_groups(hass):
@@ -140,6 +141,7 @@ async def test_group_that_disappears_is_removed(hass):
     assert remaining == {
         "firewalla_user_28_active",
         "firewalla_device_AA_AA_AA_AA_AA_01",
+        "firewalla_box_box-gid_online",
     }
 
 

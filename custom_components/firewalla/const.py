@@ -32,6 +32,8 @@ API_ENDPOINTS = {
     "rule_detail": "/rules/{rule_id}",
     "devices": "/devices",
     "users": "/users",
+    "boxes": "/boxes",
+    "flow_trends": "/trends/flows",
     # V1 endpoints (legacy, for fallback)
     "legacy_rules": "/rule/list",
 }
@@ -91,6 +93,8 @@ DEFAULT_BASE_POLL_INTERVAL = 45  # seconds — base coordinator poll cycle
 DEFAULT_FULL_RULES_INTERVAL = 300  # seconds — full rules refresh (default 5 min)
 DEFAULT_DEVICES_INTERVAL = 600  # seconds — device list refresh (default 10 min)
 DEFAULT_USERS_CACHE_TTL = 1800  # seconds — user data cache (default 30 min)
+FLOW_TRENDS_INTERVAL = 900  # seconds — daily blocked-flow trends, at most every 15 min
+BOX_STATS_TIMEOUT = 10  # seconds — cap on the optional box-stats calls per poll
 # Timelimit-only rules are fetched every base poll between full refreshes
 
 # Authentication

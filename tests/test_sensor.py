@@ -261,12 +261,21 @@ class TestAsyncSetupEntry:
 
         await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
 
-        # Should be called with list containing one sensor entity
+        # Rules summary plus the box status sensors (#13)
         async_add_entities.assert_called_once()
         entities = async_add_entities.call_args[0][0]
 
-        assert len(entities) == 1
         assert isinstance(entities[0], FirewallaRulesSensor)
+        assert [e.unique_id for e in entities[1:]] == [
+            f"firewalla_box_{mock_coordinator.box_gid}_{key}"
+            for key in (
+                "public_ip",
+                "total_devices",
+                "online_devices",
+                "alarms",
+                "firmware",
+            )
+        ]
 
     @pytest.mark.asyncio
     async def test_async_setup_entry_missing_coordinator(
@@ -297,8 +306,11 @@ class TestAsyncSetupEntry:
         ):
             await async_setup_entry(mock_hass, mock_config_entry, async_add_entities)
 
-        # Should still be called with empty list (no True argument)
-        async_add_entities.assert_called_once_with([])
+        # The other sensors are still added without the rules summary
+        async_add_entities.assert_called_once()
+        entities = async_add_entities.call_args[0][0]
+        assert not any(isinstance(e, FirewallaRulesSensor) for e in entities)
+        assert len(entities) == 5
 
 
 class TestFirewallaTimeLimitSensor:

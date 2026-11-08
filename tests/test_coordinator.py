@@ -282,13 +282,17 @@ class TestFirewallaDataUpdateCoordinator:
     @pytest.fixture
     def coordinator(self, mock_hass, mock_aiohttp_session):
         """Create a test coordinator."""
-        return FirewallaDataUpdateCoordinator(
+        coord = FirewallaDataUpdateCoordinator(
             hass=mock_hass,
             session=mock_aiohttp_session,
             msp_domain="test.firewalla.net",
             access_token="test_token_123",
             box_gid="box-123",
         )
+        # Box statistics (#13) are optional calls; keep them off the mock session.
+        coord.api.get_boxes = AsyncMock(return_value=[])
+        coord.api.get_flow_trends = AsyncMock(return_value=[])
+        return coord
 
     @pytest.mark.asyncio
     async def test_async_update_data_success(self, coordinator, mock_api_responses):
@@ -841,7 +845,7 @@ class TestSplitPolling:
 
     @pytest.fixture
     def coordinator(self, mock_hass, mock_aiohttp_session):
-        return FirewallaDataUpdateCoordinator(
+        coord = FirewallaDataUpdateCoordinator(
             hass=mock_hass,
             session=mock_aiohttp_session,
             msp_domain="test.firewalla.net",
@@ -852,6 +856,10 @@ class TestSplitPolling:
             devices_interval=600,  # every ~13 polls (600/45)
             users_cache_ttl=1800,
         )
+        # Box statistics (#13) are optional calls; keep them off the mock session.
+        coord.api.get_boxes = AsyncMock(return_value=[])
+        coord.api.get_flow_trends = AsyncMock(return_value=[])
+        return coord
 
     def test_configurable_intervals_stored(self, coordinator):
         """Test that configurable intervals are stored correctly."""
