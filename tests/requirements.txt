@@ -1,4 +1,5 @@
 # Test requirements for Firewalla integration
-pytest-homeassistant-custom-component>=0.13.200
-aioresponses>=0.7.4
+# Pinned so local runs match CI (Python 3.12). 0.13.205 brings homeassistant 2025.1.4.
+pytest-homeassistant-custom-component==0.13.205
+aioresponses==0.7.9
 aiohttp>=3.8.0

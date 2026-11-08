@@ -421,6 +421,8 @@ logger:
 
 ## Development
 
+Tests run on Python 3.12, matching CI; `tests/requirements.txt` pins the test dependencies.
+
 ```bash
 # Install test dependencies
 pip install -r tests/requirements.txt

@@ -78,8 +78,14 @@ The test suite provides comprehensive coverage for:
 
 ### Prerequisites
 
-Install test dependencies:
+The suite runs on **Python 3.12**, the version CI uses. `tests/requirements.txt` pins
+`pytest-homeassistant-custom-component`, which in turn pins the Home Assistant version the tests
+run against (2025.1.4), so a local install matches CI.
+
+Install test dependencies in a Python 3.12 virtual environment:
 ```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
 pip install -r tests/requirements.txt
 ```
 
