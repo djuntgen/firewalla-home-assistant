@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+- **Hassfest validation** — removed `aiohttp` from the manifest's `requirements`. Home Assistant already ships it, and hassfest (since HA 2026.10) rejects custom integrations that list a core dependency
+
 ## v1.1.0 (2026-04-05)
 
 ### New Features
