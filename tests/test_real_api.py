@@ -43,6 +43,13 @@ else:
 pytestmark = pytest.mark.skipif(bool(_SKIP_REASON), reason=_SKIP_REASON)
 
 
+def _rule_status(rule: Dict[str, Any]) -> str:
+    """Return "paused" or "active" for a rule as the MSP API reports it."""
+    if rule.get("status") == "paused" or rule.get("paused") is True:
+        return "paused"
+    return rule.get("status") or "active"
+
+
 @pytest.fixture
 async def real_api_session():
     """Create a real aiohttp session for API testing."""
@@ -219,7 +226,7 @@ class TestRealFirewallaMSPAPI:
         # Find a rule that's currently active (not paused) for testing
         test_rule = None
         for rule in rules_list:
-            if isinstance(rule, dict) and not rule.get("paused", False):
+            if isinstance(rule, dict) and _rule_status(rule) == "active":
                 test_rule = rule
                 break
 
@@ -230,38 +237,32 @@ class TestRealFirewallaMSPAPI:
         assert rule_id, "Test rule must have an ID"
 
         print(f"\nTesting pause/resume cycle with rule: {rule_id}")
-        print(f"Rule type: {test_rule.get('type')}")
-        print(f"Rule value: {test_rule.get('value')}")
 
+        # From the moment we ask to pause, always try to resume the rule, even
+        # if a later step fails, so a live rule is never left paused. Failures
+        # fail the test; they are never turned into skips.
         try:
-            # Test pause operation
-            print("Testing pause operation...")
-            pause_result = await real_msp_client.pause_rule(rule_id)
-            print(f"Pause result: {pause_result}")
-
-            # Wait a moment for the change to propagate
+            await real_msp_client.pause_rule(rule_id)
             await asyncio.sleep(2)
 
-            # Verify rule is paused by getting its status
-            rule_status = await real_msp_client.get_rule_status(rule_id)
-            print(f"Rule status after pause: {rule_status}")
+            paused_status = await real_msp_client.get_rule_status(rule_id)
+            assert (
+                _rule_status(paused_status) == "paused"
+            ), f"Rule {rule_id} should be paused after pause_rule"
+        finally:
+            try:
+                await real_msp_client.resume_rule(rule_id)
+            except Exception as err:
+                pytest.fail(
+                    f"Could not resume rule {rule_id} after pausing it; it may still be "
+                    f"PAUSED on the firewall and needs resuming by hand: {err!r}"
+                )
 
-            # Test resume operation
-            print("Testing resume operation...")
-            resume_result = await real_msp_client.resume_rule(rule_id)
-            print(f"Resume result: {resume_result}")
-
-            # Wait a moment for the change to propagate
-            await asyncio.sleep(2)
-
-            # Verify rule is resumed
-            final_status = await real_msp_client.get_rule_status(rule_id)
-            print(f"Rule status after resume: {final_status}")
-
-        except Exception as e:
-            print(f"Error during pause/resume testing: {e}")
-            # Don't fail the test if we can't safely test pause/resume
-            pytest.skip(f"Cannot safely test pause/resume: {e}")
+        await asyncio.sleep(2)
+        final_status = await real_msp_client.get_rule_status(rule_id)
+        assert (
+            _rule_status(final_status) == "active"
+        ), f"Rule {rule_id} should be active again after resume_rule"
 
     @pytest.mark.asyncio
     async def test_real_api_error_handling(self, real_api_session):
