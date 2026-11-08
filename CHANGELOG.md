@@ -9,6 +9,7 @@
 
 ### Bug Fixes
 
+- **Dashboard generation on HA 2024.1–2025.1** — the auto-generated dashboard is saved again on Home Assistant versions before 2025.2, which store lovelace data as a dict rather than an object, and a failure now reports the actual error instead of telling you to create a dashboard that already exists ([#12](https://github.com/djuntgen/firewalla-home-assistant/issues/12), [#8](https://github.com/djuntgen/firewalla-home-assistant/issues/8))
 - **Hassfest validation** — removed `aiohttp` from the manifest's `requirements`. Home Assistant already ships it, and hassfest (since HA 2026.10) rejects custom integrations that list a core dependency
 - **Stop forcing DEBUG logging** — the integration no longer sets its loggers to DEBUG on import, so Home Assistant's `logger:` config controls its log level again and the log is no longer flooded on every poll ([#14](https://github.com/djuntgen/firewalla-home-assistant/issues/14))
 

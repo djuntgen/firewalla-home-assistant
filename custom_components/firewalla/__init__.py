@@ -196,7 +196,13 @@ async def _async_generate_dashboard(hass: HomeAssistant, dashboard_users: str) -
     }
 
     try:
-        dashboards = hass.data["lovelace"].dashboards
+        # HA 2025.2+ stores a LovelaceData object; up to 2025.1 it is a dict.
+        lovelace = hass.data["lovelace"]
+        dashboards = (
+            lovelace["dashboards"]
+            if isinstance(lovelace, dict)
+            else lovelace.dashboards
+        )
         if DASHBOARD_URL_PATH not in dashboards:
             _LOGGER.warning(
                 "Dashboard '%s' does not exist — create it in "
@@ -212,9 +218,7 @@ async def _async_generate_dashboard(hass: HomeAssistant, dashboard_users: str) -
         )
     except Exception as err:
         _LOGGER.warning(
-            "Could not generate dashboard (create '%s' dashboard manually first): %s",
-            DASHBOARD_URL_PATH,
-            err,
+            "Could not generate the '%s' dashboard: %s", DASHBOARD_URL_PATH, err
         )
 
 
