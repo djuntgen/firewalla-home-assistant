@@ -113,7 +113,6 @@ def validate_integration_functions():
             "async_setup_entry",
             "async_unload_entry", 
             "async_reload_entry",
-            "setup_integration_logging",
         ]
         
         missing_functions = []

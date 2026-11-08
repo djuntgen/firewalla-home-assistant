@@ -1,5 +1,7 @@
 """Tests for Firewalla integration initialization."""
 
+import logging
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
@@ -16,7 +18,6 @@ from custom_components.firewalla import (
     async_setup_entry,
     async_unload_entry,
     async_reload_entry,
-    setup_integration_logging,
 )
 from custom_components.firewalla.const import (
     CONF_ACCESS_TOKEN,
@@ -322,27 +323,27 @@ class TestAsyncReloadEntry:
             await async_reload_entry(mock_hass, mock_config_entry)
 
 
-class TestSetupIntegrationLogging:
-    """Test integration logging setup."""
+class TestIntegrationLogging:
+    """Test that the integration leaves log levels to Home Assistant."""
 
-    def test_setup_integration_logging(self):
-        """Test logging setup function."""
-        with patch("logging.getLogger") as mock_get_logger:
-            mock_logger = MagicMock()
-            mock_get_logger.return_value = mock_logger
+    def test_import_does_not_change_logger_level(self):
+        """Importing the integration must not override the configured level.
 
-            setup_integration_logging()
+        Regression test for issue #14: the module used to force DEBUG on
+        import, so the user's `logger:` config could not silence it.
+        """
+        import importlib
 
-            # Verify loggers were configured
-            assert mock_get_logger.call_count >= 5  # At least 5 loggers
-            mock_logger.setLevel.assert_called()
+        import custom_components.firewalla as integration
 
-    def test_setup_integration_logging_exists_and_callable(self):
-        """Test that setup_integration_logging is defined and callable."""
-        # Verify the function exists and can be called without error
-        assert callable(setup_integration_logging)
-        # Call it again to verify it doesn't raise
-        setup_integration_logging()
+        logger = logging.getLogger("custom_components.firewalla")
+        original_level = logger.level
+        try:
+            logger.setLevel(logging.WARNING)
+            importlib.reload(integration)
+            assert logger.level == logging.WARNING
+        finally:
+            logger.setLevel(original_level)
 
 
 class TestEndToEndIntegration:

@@ -454,28 +454,3 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         "Reloading Firewalla rule management integration for entry %s", entry.entry_id
     )
     await hass.config_entries.async_reload(entry.entry_id)
-
-
-def setup_integration_logging() -> None:
-    """Set up integration-wide logging configuration."""
-    # This function can be called during integration setup to configure
-    # any special logging requirements for the Firewalla integration
-
-    # Set appropriate log levels for integration components
-    integration_loggers = [
-        f"{__name__}",
-        f"{__name__.replace('.__init__', '.coordinator')}",
-        f"{__name__.replace('.__init__', '.config_flow')}",
-        f"{__name__.replace('.__init__', '.switch')}",
-        f"{__name__.replace('.__init__', '.sensor')}",
-    ]
-
-    for logger_name in integration_loggers:
-        logger = logging.getLogger(logger_name)
-        # Ensure loggers are properly configured
-        # The actual log level will be controlled by Home Assistant's logging config
-        logger.setLevel(logging.DEBUG)
-
-
-# Set up logging when module is imported
-setup_integration_logging()

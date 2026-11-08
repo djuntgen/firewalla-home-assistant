@@ -5,6 +5,7 @@
 ### Bug Fixes
 
 - **Hassfest validation** — removed `aiohttp` from the manifest's `requirements`. Home Assistant already ships it, and hassfest (since HA 2026.10) rejects custom integrations that list a core dependency
+- **Stop forcing DEBUG logging** — the integration no longer sets its loggers to DEBUG on import, so Home Assistant's `logger:` config controls its log level again and the log is no longer flooded on every poll ([#14](https://github.com/djuntgen/firewalla-home-assistant/issues/14))
 
 ## v1.1.0 (2026-04-05)
 

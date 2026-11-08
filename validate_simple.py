@@ -83,7 +83,6 @@ def validate_init_functions():
             "async_setup_entry",
             "async_unload_entry", 
             "async_reload_entry",
-            "setup_integration_logging"
         ]
         
         all_present = True
