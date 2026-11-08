@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### New Features
+
+- **Device groups get their devices** — Firewalla device groups (groups with no user) now appear in HA like user groups: an online sensor for each member device, plus the group's activity and 24h download/upload sensors. Before, a device group showed up only when it had rules, and then without its devices. Existing entity IDs are unchanged, and a device that moves between groups keeps its entity ([#11](https://github.com/djuntgen/firewalla-home-assistant/issues/11))
+
 ### Bug Fixes
 
 - **Hassfest validation** — removed `aiohttp` from the manifest's `requirements`. Home Assistant already ships it, and hassfest (since HA 2026.10) rejects custom integrations that list a core dependency

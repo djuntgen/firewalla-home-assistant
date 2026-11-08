@@ -27,9 +27,9 @@ Firewalla is great at managing your network, but checking time limits and toggli
 - **Group internet switches** — "Block On" / "Block Off" matching the Firewalla app UX
 - **Per-group rule switches** — category/app block rules per group
 - **Time limit sensors** — per-user app and internet time limits with remaining minutes, quota, usage percentage
-- **Per-user bandwidth sensors** — 24h download/upload in GB per user group
-- **Per-device online sensors** — online/offline status with IP, MAC vendor, network, last seen
-- **User activity sensors** — binary sensors detecting active internet usage per user
+- **Per-group bandwidth sensors** — 24h download/upload in GB per user group or device group
+- **Per-device online sensors** — online/offline status with IP, MAC vendor, network, last seen, for devices in any group
+- **Group activity sensors** — binary sensors detecting active internet usage per user group or device group
 - **Rules summary sensor** — overview of total/active/paused rules with breakdown by type
 - **Manual refresh button** — on-demand full data refresh from the Firewalla device page
 - **Auto-generated dashboard** — enter user names, get a per-user parental control dashboard with progress bars, bandwidth graphs, device lists, and block toggles
@@ -130,11 +130,13 @@ All entity names are derived from API data. Users can override display names via
 | Bandwidth (download) | "Download" | GB (24h) | bytes, mb |
 | Bandwidth (upload) | "Upload" | GB (24h) | bytes, mb |
 
+Bandwidth is the sum of the group's devices' download/upload over the last 24 hours, as reported by the Firewalla API, for user groups and device groups alike.
+
 ### Binary Sensors
 
 | Entity | Name Source | State | Key Attributes |
 |--------|------------|-------|----------------|
-| User activity | "Active" | ON = traffic flowing | online_devices, active_devices, download_delta_bytes |
+| Group activity | "Active" | ON = traffic flowing | online_devices, active_devices, download_delta_bytes |
 | Device online | Device name from API | ON = online | ip, mac_vendor, network, last_seen, download_24h_mb, upload_24h_mb |
 
 ### Buttons
@@ -145,7 +147,7 @@ All entity names are derived from API data. Users can override display names via
 
 ### Device Grouping
 
-Each Firewalla user group becomes an HA **device** named after the user (e.g., "Alice", "Bob"). All entities for that user are grouped under their device. The main Firewalla box is also a device, hosting the rules summary sensor and refresh button.
+Each Firewalla group becomes an HA **device**. A user group is named after the user (e.g., "Alice", "Bob"); a device group (a group with no Firewalla user, e.g., "Cameras") keeps its group name. Every group gets an activity sensor, download/upload sensors and an online sensor per member device, plus its internet and rule switches when it has rules. A device that moves to another group in Firewalla keeps its entity, which moves to the new group's HA device. The main Firewalla box is also a device, hosting the rules summary sensor and refresh button.
 
 ## Architecture
 
