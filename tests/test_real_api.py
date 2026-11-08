@@ -1,7 +1,15 @@
-"""Integration tests using real Firewalla MSP API.
+"""Integration tests using the real Firewalla MSP API.
 
-These tests require real API credentials and network access.
-They are skipped in CI (detected via GITHUB_ACTIONS env var).
+These tests talk to a live Firewalla MSP account, so they never run by default.
+Opt in with environment variables (never put credentials in this file):
+
+    FIREWALLA_REAL_API=1          run the read-only tests
+    FIREWALLA_MSP_DOMAIN=...      your MSP domain, e.g. mydomain.firewalla.net
+    FIREWALLA_ACCESS_TOKEN=...    your MSP personal access token
+    FIREWALLA_REAL_API_WRITE=1    also run the test that pauses and resumes a
+                                  live rule on your firewall
+
+See tests/README.md.
 """
 
 import os
@@ -11,21 +19,28 @@ import aiohttp
 import asyncio
 from typing import Dict, Any
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("GITHUB_ACTIONS") == "true"
-    or os.environ.get("CI") == "true",
-    reason="Real API tests require network access and valid credentials",
-)
-
 from custom_components.firewalla.coordinator import (
     FirewallaMSPClient,
     FirewallaDataUpdateCoordinator,
 )
 from custom_components.firewalla.const import API_ENDPOINTS, MSP_API_V2_BASE
 
-# Test credentials
-TEST_MSP_DOMAIN = "mydomain.firewalla.net"
-TEST_ACCESS_TOKEN = "MYTOKEN"
+REAL_API_ENABLED = os.environ.get("FIREWALLA_REAL_API") == "1"
+REAL_API_WRITE_ENABLED = os.environ.get("FIREWALLA_REAL_API_WRITE") == "1"
+TEST_MSP_DOMAIN = os.environ.get("FIREWALLA_MSP_DOMAIN", "")
+TEST_ACCESS_TOKEN = os.environ.get("FIREWALLA_ACCESS_TOKEN", "")
+
+if not REAL_API_ENABLED:
+    _SKIP_REASON = "Live Firewalla API tests are opt-in: set FIREWALLA_REAL_API=1"
+elif not (TEST_MSP_DOMAIN and TEST_ACCESS_TOKEN):
+    _SKIP_REASON = (
+        "FIREWALLA_REAL_API=1 also needs FIREWALLA_MSP_DOMAIN and "
+        "FIREWALLA_ACCESS_TOKEN to be set"
+    )
+else:
+    _SKIP_REASON = ""
+
+pytestmark = pytest.mark.skipif(bool(_SKIP_REASON), reason=_SKIP_REASON)
 
 
 @pytest.fixture
@@ -177,6 +192,10 @@ class TestRealFirewallaMSPAPI:
                 field in all_fields
             ), f"Expected field '{field}' not found in rule data"
 
+    @pytest.mark.skipif(
+        not _SKIP_REASON and not REAL_API_WRITE_ENABLED,
+        reason="Pauses and resumes a live firewall rule: set FIREWALLA_REAL_API_WRITE=1",
+    )
     @pytest.mark.asyncio
     async def test_real_api_pause_resume_cycle(self, real_msp_client):
         """Test pause/resume cycle with a real rule (if safe to do so)."""
@@ -261,7 +280,7 @@ class TestRealFirewallaMSPAPI:
         invalid_domain_client = FirewallaMSPClient(
             session=real_api_session,
             msp_domain="invalid.firewalla.net",
-            access_token=TEST_ACCESS_TOKEN,
+            access_token="invalid_token_123",
         )
 
         result = await invalid_domain_client.authenticate()
@@ -418,6 +437,11 @@ async def test_api_endpoints_validation():
 
 if __name__ == "__main__":
     # Run a quick test to validate API access
+    if not (TEST_MSP_DOMAIN and TEST_ACCESS_TOKEN):
+        raise SystemExit(
+            "Set FIREWALLA_MSP_DOMAIN and FIREWALLA_ACCESS_TOKEN to run this check"
+        )
+
     async def quick_test():
         async with aiohttp.ClientSession() as session:
             client = FirewallaMSPClient(

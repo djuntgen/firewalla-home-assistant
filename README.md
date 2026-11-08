@@ -435,6 +435,10 @@ pytest tests/test_coordinator.py -v
 pytest tests/ -k "test_split_polling" -v
 ```
 
+Tests against a live Firewalla account (`tests/test_real_api.py`) are skipped unless you set
+`FIREWALLA_REAL_API=1` with `FIREWALLA_MSP_DOMAIN` and `FIREWALLA_ACCESS_TOKEN`; see
+[tests/README.md](tests/README.md).
+
 ## API Reference
 
 - [Firewalla MSP API Docs](https://docs.firewalla.net)
