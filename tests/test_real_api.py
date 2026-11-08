@@ -15,6 +15,7 @@ See tests/README.md.
 import os
 
 import pytest
+import pytest_socket
 import aiohttp
 import asyncio
 from typing import Dict, Any
@@ -50,10 +51,41 @@ def _rule_status(rule: Dict[str, Any]) -> str:
     return rule.get("status") or "active"
 
 
+def _live_session() -> aiohttp.ClientSession:
+    """Create a session for talking to the real MSP API.
+
+    Uses aiohttp's ThreadedResolver (the OS resolver) instead of aiodns: with
+    Home Assistant 2025.1.4's test dependencies, aiodns 3.2.0 fails with pycares 5 ("getaddrinfo()
+    takes 3 positional arguments") and pycares leaves a shutdown thread that
+    the Home Assistant test plugin reports as a lingering thread.
+    """
+    return aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+    )
+
+
+@pytest.fixture(autouse=True)
+def allow_network():
+    """Let the opted-in live tests open real network connections.
+
+    pytest-homeassistant-custom-component blocks sockets before every test
+    (socket_allow_hosts(["127.0.0.1"]) then disable_socket()). This module only
+    runs when FIREWALLA_REAL_API=1, so lift both restrictions for its tests and
+    put them back afterwards so other tests stay blocked.
+    """
+    # _remove_restrictions() is private pytest_socket API (0.7.0): it undoes
+    # both disable_socket() and socket_allow_hosts(). The public socket_enabled
+    # fixture lifts only the first.
+    pytest_socket._remove_restrictions()
+    yield
+    pytest_socket.socket_allow_hosts(["127.0.0.1"])
+    pytest_socket.disable_socket(allow_unix_socket=True)
+
+
 @pytest.fixture
 async def real_api_session():
     """Create a real aiohttp session for API testing."""
-    session = aiohttp.ClientSession()
+    session = _live_session()
     yield session
     await session.close()
 
@@ -402,7 +434,7 @@ class TestRealDataProcessing:
 @pytest.mark.asyncio
 async def test_api_endpoints_validation():
     """Test that our API endpoints work with the real API."""
-    async with aiohttp.ClientSession() as session:
+    async with _live_session() as session:
         base_url = MSP_API_V2_BASE.format(domain=TEST_MSP_DOMAIN)
         headers = {
             "Authorization": f"Token {TEST_ACCESS_TOKEN}",
@@ -444,7 +476,7 @@ if __name__ == "__main__":
         )
 
     async def quick_test():
-        async with aiohttp.ClientSession() as session:
+        async with _live_session() as session:
             client = FirewallaMSPClient(
                 session=session,
                 msp_domain=TEST_MSP_DOMAIN,
