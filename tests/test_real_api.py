@@ -1,21 +1,24 @@
-"""Integration tests using real Firewalla MSP API.
+"""Integration tests using the real Firewalla MSP API.
 
-These tests require real API credentials and network access.
-They are skipped in CI (detected via GITHUB_ACTIONS env var).
+These tests talk to a live Firewalla MSP account, so they never run by default.
+Opt in with environment variables (never put credentials in this file):
+
+    FIREWALLA_REAL_API=1          run the read-only tests
+    FIREWALLA_MSP_DOMAIN=...      your MSP domain, e.g. mydomain.firewalla.net
+    FIREWALLA_ACCESS_TOKEN=...    your MSP personal access token
+    FIREWALLA_REAL_API_WRITE=1    also run the test that pauses and resumes a
+                                  live rule on your firewall
+
+See tests/README.md.
 """
 
 import os
 
 import pytest
+import pytest_socket
 import aiohttp
 import asyncio
 from typing import Dict, Any
-
-pytestmark = pytest.mark.skipif(
-    os.environ.get("GITHUB_ACTIONS") == "true"
-    or os.environ.get("CI") == "true",
-    reason="Real API tests require network access and valid credentials",
-)
 
 from custom_components.firewalla.coordinator import (
     FirewallaMSPClient,
@@ -23,15 +26,66 @@ from custom_components.firewalla.coordinator import (
 )
 from custom_components.firewalla.const import API_ENDPOINTS, MSP_API_V2_BASE
 
-# Test credentials
-TEST_MSP_DOMAIN = "mydomain.firewalla.net"
-TEST_ACCESS_TOKEN = "MYTOKEN"
+REAL_API_ENABLED = os.environ.get("FIREWALLA_REAL_API") == "1"
+REAL_API_WRITE_ENABLED = os.environ.get("FIREWALLA_REAL_API_WRITE") == "1"
+TEST_MSP_DOMAIN = os.environ.get("FIREWALLA_MSP_DOMAIN", "")
+TEST_ACCESS_TOKEN = os.environ.get("FIREWALLA_ACCESS_TOKEN", "")
+
+if not REAL_API_ENABLED:
+    _SKIP_REASON = "Live Firewalla API tests are opt-in: set FIREWALLA_REAL_API=1"
+elif not (TEST_MSP_DOMAIN and TEST_ACCESS_TOKEN):
+    _SKIP_REASON = (
+        "FIREWALLA_REAL_API=1 also needs FIREWALLA_MSP_DOMAIN and "
+        "FIREWALLA_ACCESS_TOKEN to be set"
+    )
+else:
+    _SKIP_REASON = ""
+
+pytestmark = pytest.mark.skipif(bool(_SKIP_REASON), reason=_SKIP_REASON)
+
+
+def _rule_status(rule: Dict[str, Any]) -> str:
+    """Return "paused" or "active" for a rule as the MSP API reports it."""
+    if rule.get("status") == "paused" or rule.get("paused") is True:
+        return "paused"
+    return rule.get("status") or "active"
+
+
+def _live_session() -> aiohttp.ClientSession:
+    """Create a session for talking to the real MSP API.
+
+    Uses aiohttp's ThreadedResolver (the OS resolver) instead of aiodns: with
+    Home Assistant 2025.1.4's test dependencies, aiodns 3.2.0 fails with pycares 5 ("getaddrinfo()
+    takes 3 positional arguments") and pycares leaves a shutdown thread that
+    the Home Assistant test plugin reports as a lingering thread.
+    """
+    return aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+    )
+
+
+@pytest.fixture(autouse=True)
+def allow_network():
+    """Let the opted-in live tests open real network connections.
+
+    pytest-homeassistant-custom-component blocks sockets before every test
+    (socket_allow_hosts(["127.0.0.1"]) then disable_socket()). This module only
+    runs when FIREWALLA_REAL_API=1, so lift both restrictions for its tests and
+    put them back afterwards so other tests stay blocked.
+    """
+    # _remove_restrictions() is private pytest_socket API (0.7.0): it undoes
+    # both disable_socket() and socket_allow_hosts(). The public socket_enabled
+    # fixture lifts only the first.
+    pytest_socket._remove_restrictions()
+    yield
+    pytest_socket.socket_allow_hosts(["127.0.0.1"])
+    pytest_socket.disable_socket(allow_unix_socket=True)
 
 
 @pytest.fixture
 async def real_api_session():
     """Create a real aiohttp session for API testing."""
-    session = aiohttp.ClientSession()
+    session = _live_session()
     yield session
     await session.close()
 
@@ -177,6 +231,10 @@ class TestRealFirewallaMSPAPI:
                 field in all_fields
             ), f"Expected field '{field}' not found in rule data"
 
+    @pytest.mark.skipif(
+        not _SKIP_REASON and not REAL_API_WRITE_ENABLED,
+        reason="Pauses and resumes a live firewall rule: set FIREWALLA_REAL_API_WRITE=1",
+    )
     @pytest.mark.asyncio
     async def test_real_api_pause_resume_cycle(self, real_msp_client):
         """Test pause/resume cycle with a real rule (if safe to do so)."""
@@ -200,7 +258,7 @@ class TestRealFirewallaMSPAPI:
         # Find a rule that's currently active (not paused) for testing
         test_rule = None
         for rule in rules_list:
-            if isinstance(rule, dict) and not rule.get("paused", False):
+            if isinstance(rule, dict) and _rule_status(rule) == "active":
                 test_rule = rule
                 break
 
@@ -211,38 +269,32 @@ class TestRealFirewallaMSPAPI:
         assert rule_id, "Test rule must have an ID"
 
         print(f"\nTesting pause/resume cycle with rule: {rule_id}")
-        print(f"Rule type: {test_rule.get('type')}")
-        print(f"Rule value: {test_rule.get('value')}")
 
+        # From the moment we ask to pause, always try to resume the rule, even
+        # if a later step fails, so a live rule is never left paused. Failures
+        # fail the test; they are never turned into skips.
         try:
-            # Test pause operation
-            print("Testing pause operation...")
-            pause_result = await real_msp_client.pause_rule(rule_id)
-            print(f"Pause result: {pause_result}")
-
-            # Wait a moment for the change to propagate
+            await real_msp_client.pause_rule(rule_id)
             await asyncio.sleep(2)
 
-            # Verify rule is paused by getting its status
-            rule_status = await real_msp_client.get_rule_status(rule_id)
-            print(f"Rule status after pause: {rule_status}")
+            paused_status = await real_msp_client.get_rule_status(rule_id)
+            assert (
+                _rule_status(paused_status) == "paused"
+            ), f"Rule {rule_id} should be paused after pause_rule"
+        finally:
+            try:
+                await real_msp_client.resume_rule(rule_id)
+            except Exception as err:
+                pytest.fail(
+                    f"Could not resume rule {rule_id} after pausing it; it may still be "
+                    f"PAUSED on the firewall and needs resuming by hand: {err!r}"
+                )
 
-            # Test resume operation
-            print("Testing resume operation...")
-            resume_result = await real_msp_client.resume_rule(rule_id)
-            print(f"Resume result: {resume_result}")
-
-            # Wait a moment for the change to propagate
-            await asyncio.sleep(2)
-
-            # Verify rule is resumed
-            final_status = await real_msp_client.get_rule_status(rule_id)
-            print(f"Rule status after resume: {final_status}")
-
-        except Exception as e:
-            print(f"Error during pause/resume testing: {e}")
-            # Don't fail the test if we can't safely test pause/resume
-            pytest.skip(f"Cannot safely test pause/resume: {e}")
+        await asyncio.sleep(2)
+        final_status = await real_msp_client.get_rule_status(rule_id)
+        assert (
+            _rule_status(final_status) == "active"
+        ), f"Rule {rule_id} should be active again after resume_rule"
 
     @pytest.mark.asyncio
     async def test_real_api_error_handling(self, real_api_session):
@@ -260,8 +312,8 @@ class TestRealFirewallaMSPAPI:
         # Test with invalid domain
         invalid_domain_client = FirewallaMSPClient(
             session=real_api_session,
-            msp_domain="invalid.firewalla.net",
-            access_token=TEST_ACCESS_TOKEN,
+            msp_domain="firewalla.invalid",
+            access_token="invalid_token_123",
         )
 
         result = await invalid_domain_client.authenticate()
@@ -382,7 +434,7 @@ class TestRealDataProcessing:
 @pytest.mark.asyncio
 async def test_api_endpoints_validation():
     """Test that our API endpoints work with the real API."""
-    async with aiohttp.ClientSession() as session:
+    async with _live_session() as session:
         base_url = MSP_API_V2_BASE.format(domain=TEST_MSP_DOMAIN)
         headers = {
             "Authorization": f"Token {TEST_ACCESS_TOKEN}",
@@ -418,8 +470,13 @@ async def test_api_endpoints_validation():
 
 if __name__ == "__main__":
     # Run a quick test to validate API access
+    if not (TEST_MSP_DOMAIN and TEST_ACCESS_TOKEN):
+        raise SystemExit(
+            "Set FIREWALLA_MSP_DOMAIN and FIREWALLA_ACCESS_TOKEN to run this check"
+        )
+
     async def quick_test():
-        async with aiohttp.ClientSession() as session:
+        async with _live_session() as session:
             client = FirewallaMSPClient(
                 session=session,
                 msp_domain=TEST_MSP_DOMAIN,

@@ -15,6 +15,7 @@ tests/
 ├── test_sensor.py              # Tests for sensor entities (device status/rules)
 ├── test_init.py                # Tests for integration initialization
 ├── test_error_handling.py      # Tests for error scenarios and edge cases
+├── test_real_api.py            # Live Firewalla API tests (opt-in, skipped by default)
 └── README.md                   # This file
 ```
 
@@ -125,6 +126,24 @@ pytest tests/test_coordinator.py::TestFirewallaMSPClient::test_authenticate_succ
 ```bash
 pytest tests/ --cov=custom_components.firewalla --cov-report=html --cov-report=term-missing
 ```
+
+### Live Firewalla API tests (opt-in)
+
+`test_real_api.py` talks to a real Firewalla MSP account, so it is skipped unless you
+opt in. Credentials come from environment variables only; never write them into the file.
+
+```bash
+# Read-only tests against your MSP account
+FIREWALLA_REAL_API=1 \
+FIREWALLA_MSP_DOMAIN=mydomain.firewalla.net \
+FIREWALLA_ACCESS_TOKEN=<your token> \
+pytest tests/test_real_api.py -v -rs
+```
+
+`test_real_api_pause_resume_cycle` pauses and then resumes a live rule on your firewall.
+It needs a second flag on top of the above: `FIREWALLA_REAL_API_WRITE=1`.
+
+Without the flags, `pytest tests/ -rs` lists these tests as skipped with the reason.
 
 ## Test Fixtures
 

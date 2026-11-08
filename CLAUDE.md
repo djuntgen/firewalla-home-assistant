@@ -24,6 +24,10 @@ pytest tests/test_coordinator.py -v
 python run_tests.py "test_pattern_name"
 # or:
 pytest tests/ -k "test_pattern_name" -v
+
+# Live Firewalla API tests are skipped unless opted in (credentials from env only;
+# FIREWALLA_REAL_API_WRITE=1 additionally allows pausing/resuming a live rule):
+FIREWALLA_REAL_API=1 FIREWALLA_MSP_DOMAIN=... FIREWALLA_ACCESS_TOKEN=... pytest tests/test_real_api.py -v
 ```
 
 No build step — this is a pure Python HA integration installed by copying `custom_components/firewalla/` into a Home Assistant instance.
