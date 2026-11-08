@@ -16,12 +16,14 @@ from .const import (
     API_ENDPOINTS,
     API_TIMEOUT,
     AUTH_HEADER_FORMAT,
+    BOX_STATS_TIMEOUT,
     CONTENT_TYPE,
     DEFAULT_BASE_POLL_INTERVAL,
     DEFAULT_DEVICES_INTERVAL,
     DEFAULT_FULL_RULES_INTERVAL,
     DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
+    FLOW_TRENDS_INTERVAL,
     MSP_API_V2_BASE,
     RETRY_ATTEMPTS,
     RETRY_DELAYS,
@@ -367,16 +369,23 @@ class FirewallaMSPClient:
         endpoint: str,
         data: Optional[Dict[str, Any]] = None,
         retry_auth: bool = True,
+        quiet: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any] | list | None:
-        """Make an authenticated request to the MSP API with retry logic."""
+        """Make an authenticated request to the MSP API with retry logic.
+
+        ``quiet`` is for optional calls whose caller handles and logs a failure
+        once itself: a single attempt, with errors logged at debug level.
+        """
+        attempts = 1 if quiet else RETRY_ATTEMPTS
+        log_error = _LOGGER.debug if quiet else _LOGGER.error
         url = f"{self._base_url}{endpoint}"
         headers = {
             "Authorization": AUTH_HEADER_FORMAT.format(token=self._access_token),
             "Content-Type": CONTENT_TYPE,
         }
 
-        for attempt in range(RETRY_ATTEMPTS):
+        for attempt in range(attempts):
             try:
                 timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)
 
@@ -393,7 +402,7 @@ class FirewallaMSPClient:
                         method,
                         url,
                         attempt + 1,
-                        RETRY_ATTEMPTS,
+                        attempts,
                         response.status,
                     )
 
@@ -405,12 +414,12 @@ class FirewallaMSPClient:
                                 "MSP API authentication expired"
                             )
                         else:
-                            _LOGGER.error("MSP API authentication failed (HTTP 401)")
+                            log_error("MSP API authentication failed (HTTP 401)")
                             raise ConfigEntryAuthFailed("MSP API authentication failed")
 
                     # Handle rate limiting
                     if response.status == 429:
-                        if attempt < RETRY_ATTEMPTS - 1:
+                        if attempt < attempts - 1:
                             wait_time = RETRY_DELAYS[
                                 min(attempt, len(RETRY_DELAYS) - 1)
                             ]
@@ -426,7 +435,7 @@ class FirewallaMSPClient:
                     # Handle other HTTP errors
                     if response.status >= 400:
                         error_text = await response.text()
-                        _LOGGER.error(
+                        log_error(
                             "MSP API returned HTTP %d for %s %s: %s",
                             response.status,
                             method,
@@ -462,7 +471,7 @@ class FirewallaMSPClient:
                             return {"success": True}
                         else:
                             text = await response.text()
-                            _LOGGER.error(
+                            log_error(
                                 "MSP API returned non-JSON error response: %s", text
                             )
                             raise HomeAssistantError(
@@ -470,38 +479,38 @@ class FirewallaMSPClient:
                             )
 
             except asyncio.TimeoutError:
-                if attempt < RETRY_ATTEMPTS - 1:
+                if attempt < attempts - 1:
                     wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                     _LOGGER.warning(
                         "MSP API timeout on attempt %d/%d, waiting %d seconds before retry",
                         attempt + 1,
-                        RETRY_ATTEMPTS,
+                        attempts,
                         wait_time,
                     )
                     await asyncio.sleep(wait_time)
                     continue
                 else:
-                    _LOGGER.error("MSP API timeout after %d attempts", RETRY_ATTEMPTS)
+                    log_error("MSP API timeout after %d attempts", attempts)
                     raise HomeAssistantError(
-                        f"MSP API timeout after {RETRY_ATTEMPTS} attempts"
+                        f"MSP API timeout after {attempts} attempts"
                     )
 
             except aiohttp.ClientConnectorError as err:
-                if attempt < RETRY_ATTEMPTS - 1:
+                if attempt < attempts - 1:
                     wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                     _LOGGER.warning(
                         "MSP API connection error on attempt %d/%d: %s, waiting %d seconds before retry",
                         attempt + 1,
-                        RETRY_ATTEMPTS,
+                        attempts,
                         err,
                         wait_time,
                     )
                     await asyncio.sleep(wait_time)
                     continue
                 else:
-                    _LOGGER.error(
+                    log_error(
                         "MSP API connection failed after %d attempts: %s",
-                        RETRY_ATTEMPTS,
+                        attempts,
                         err,
                     )
                     raise HomeAssistantError(f"Cannot connect to MSP API: {err}")
@@ -511,26 +520,24 @@ class FirewallaMSPClient:
                 raise
 
             except Exception as err:
-                if attempt < RETRY_ATTEMPTS - 1:
+                if attempt < attempts - 1:
                     wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                     _LOGGER.warning(
                         "Unexpected MSP API error on attempt %d/%d: %s, waiting %d seconds before retry",
                         attempt + 1,
-                        RETRY_ATTEMPTS,
+                        attempts,
                         err,
                         wait_time,
                     )
                     await asyncio.sleep(wait_time)
                     continue
                 else:
-                    _LOGGER.exception(
-                        "Unexpected MSP API error after %d attempts", RETRY_ATTEMPTS
+                    (_LOGGER.debug if quiet else _LOGGER.exception)(
+                        "Unexpected MSP API error after %d attempts", attempts
                     )
                     raise HomeAssistantError(f"Unexpected MSP API error: {err}")
 
-        raise HomeAssistantError(
-            f"MSP API request failed after {RETRY_ATTEMPTS} attempts"
-        )
+        raise HomeAssistantError(f"MSP API request failed after {attempts} attempts")
 
     async def get_rules(self, query: Optional[str] = None) -> Dict[str, Any] | list:
         """Get rules from MSP API with optional query parameters."""
@@ -561,6 +568,14 @@ class FirewallaMSPClient:
     async def get_users(self) -> list:
         """Get all users from MSP API."""
         return await self._make_request("GET", API_ENDPOINTS["users"])
+
+    async def get_boxes(self) -> list:
+        """Get all boxes in the MSP account."""
+        return await self._make_request("GET", API_ENDPOINTS["boxes"], quiet=True)
+
+    async def get_flow_trends(self) -> list:
+        """Get daily blocked-flow counts (account-wide)."""
+        return await self._make_request("GET", API_ENDPOINTS["flow_trends"], quiet=True)
 
     @property
     def is_authenticated(self) -> bool:
@@ -619,6 +634,14 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         self._cached_full_rules: dict[str, Any] = {}
         self._poll_count: int = 0
 
+        # Box status/statistics (#13). Failures only affect the box-stats entities.
+        self._box_stats_failing: bool = False
+        self._cached_box: dict[str, Any] | None = None
+        self._box_count: int = 0
+        self._flow_trends_failing: bool = False
+        self._flow_trends_last_attempt: float | None = None
+        self._blocked_flows: dict[str, Any] | None = None
+
         super().__init__(
             hass,
             _LOGGER,
@@ -675,7 +698,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             rule_stats = self._calculate_rule_statistics(rules_data)
 
             # Fetch devices at configurable interval (default every 2 polls = 60s)
-            if self._poll_count % self._devices_every == 1 or not self._cached_devices:
+            refresh_devices = (
+                self._poll_count % self._devices_every == 1 or not self._cached_devices
+            )
+            if refresh_devices:
                 devices_response = await self.api.get_devices()
                 self._cached_devices = (
                     devices_response if isinstance(devices_response, list) else []
@@ -709,6 +735,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
 
             time_limits_data = _build_time_limits(users_list, rules_data)
 
+            box_stats = await self._async_fetch_box_stats(
+                devices_list, now, refresh_box=refresh_devices
+            )
+
             processed_data = {
                 "rules": rules_data,
                 "rule_count": rule_stats,
@@ -721,7 +751,10 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                 },
                 "groups": groups_data,
                 "time_limits": time_limits_data,
+                "box_stats": box_stats,
             }
+            if box_stats is not None:
+                processed_data["box_info"]["version"] = box_stats["version"]
 
             # Update previous rules for next comparison
             self._previous_rules = rules_data.copy()
@@ -748,6 +781,96 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(
                 f"Unexpected error communicating with MSP API: {err}"
             ) from err
+
+    async def _async_fetch_box_stats(
+        self, devices: list, now: float, refresh_box: bool
+    ) -> Dict[str, Any] | None:
+        """Status and statistics for the configured box.
+
+        ``/v2/boxes`` is fetched only when ``refresh_box`` is set (the polls that
+        refetch the device list), and the last result is reused in between.
+        Returns None when the box can't be fetched. A failure here never fails
+        the poll: it is logged once (until it recovers) and only the box-stats
+        entities become unavailable until the next device-list refresh.
+        """
+        if refresh_box:
+            self._cached_box = await self._async_fetch_box()
+        box = self._cached_box
+        if box is None:
+            return None
+
+        # Daily trends change slowly: fetch at most every FLOW_TRENDS_INTERVAL
+        # and keep the last value in between.
+        if (
+            self._flow_trends_last_attempt is None
+            or now - self._flow_trends_last_attempt >= FLOW_TRENDS_INTERVAL
+        ):
+            self._flow_trends_last_attempt = now
+            self._blocked_flows = await self._async_fetch_blocked_flows()
+
+        box_devices = [
+            d for d in devices if isinstance(d, dict) and d.get("gid") == self.box_gid
+        ]
+        return {
+            "online": bool(box.get("online", False)),
+            "public_ip": box.get("publicIP"),
+            "version": box.get("version"),
+            "device_count": box.get("deviceCount"),
+            "online_devices": sum(1 for d in box_devices if d.get("online")),
+            "alarm_count": box.get("alarmCount"),
+            "box_count": self._box_count,
+            "blocked_flows": self._blocked_flows,
+        }
+
+    async def _async_fetch_box(self) -> Dict[str, Any] | None:
+        """Fetch the configured box's record from /v2/boxes, or None on failure."""
+        try:
+            async with asyncio.timeout(BOX_STATS_TIMEOUT):
+                boxes = await self.api.get_boxes()
+            boxes = boxes if isinstance(boxes, list) else []
+            box = next(
+                (
+                    b
+                    for b in boxes
+                    if isinstance(b, dict) and b.get("gid") == self.box_gid
+                ),
+                None,
+            )
+            if box is None:
+                raise HomeAssistantError(f"box {self.box_gid} not in /v2/boxes")
+        except Exception as err:  # noqa: BLE001 — must not break rule updates
+            if not self._box_stats_failing:
+                _LOGGER.warning("Could not fetch Firewalla box statistics: %s", err)
+                self._box_stats_failing = True
+            return None
+        if self._box_stats_failing:
+            _LOGGER.info("Firewalla box statistics are available again")
+            self._box_stats_failing = False
+        self._box_count = len(boxes)
+        return box
+
+    async def _async_fetch_blocked_flows(self) -> Dict[str, Any] | None:
+        """Return the latest daily blocked-flow count, or None on failure."""
+        try:
+            async with asyncio.timeout(BOX_STATS_TIMEOUT):
+                points = await self.api.get_flow_trends()
+            latest = max(
+                (
+                    p
+                    for p in (points if isinstance(points, list) else [])
+                    if isinstance(p, dict) and isinstance(p.get("ts"), (int, float))
+                ),
+                key=lambda p: p["ts"],
+            )
+        except Exception as err:  # noqa: BLE001 — must not break rule updates
+            if not self._flow_trends_failing:
+                _LOGGER.warning("Could not fetch Firewalla flow trends: %s", err)
+                self._flow_trends_failing = True
+            return None
+        if self._flow_trends_failing:
+            _LOGGER.info("Firewalla flow trends are available again")
+            self._flow_trends_failing = False
+        return {"value": latest.get("value"), "ts": latest["ts"]}
 
     async def _fetch_filtered_rules(self) -> Dict[str, Any]:
         """Fetch rules with include/exclude filters applied."""

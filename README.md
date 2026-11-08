@@ -31,6 +31,7 @@ Firewalla is great at managing your network, but checking time limits and toggli
 - **Per-device online sensors** — online/offline status with IP, MAC vendor, network, last seen, for devices in any group
 - **Group activity sensors** — binary sensors detecting active internet usage per user group or device group
 - **Rules summary sensor** — overview of total/active/paused rules with breakdown by type
+- **Box status sensors** — box online, public IP, firmware version, total and online devices, alarms, and blocked flows today
 - **Manual refresh button** — on-demand full data refresh from the Firewalla device page
 - **Auto-generated dashboard** — enter user names, get a per-user parental control dashboard with progress bars, bandwidth graphs, device lists, and block toggles
 - **Dynamic entity lifecycle** — entities auto-add/remove when Firewalla rules, groups, or devices change
@@ -129,6 +130,12 @@ All entity names are derived from API data. Users can override display names via
 | Time limit | `{target.value}` (e.g., "Internet", "Youtube") | Minutes remaining | quota_minutes, used_minutes, usage_percent, reached |
 | Bandwidth (download) | "Download" | GB (24h) | bytes, mb |
 | Bandwidth (upload) | "Upload" | GB (24h) | bytes, mb |
+| Public IP | "Public IP" (diagnostic) | Box's public IP | — |
+| Firmware version | "Firmware version" (diagnostic) | Firewalla software version, also shown as the box device's firmware | — |
+| Total devices | "Total devices" | Devices on the box | — |
+| Online devices | "Online devices" | Devices on the box that are online | — |
+| Alarms | "Alarms" | The box's alarm count | — |
+| Blocked flows today | "Blocked flows today" | Flows blocked so far in the box's current local day | day_start_ts |
 
 Bandwidth is the sum of the group's devices' download/upload over the last 24 hours, as reported by the Firewalla API, for user groups and device groups alike.
 
@@ -138,6 +145,19 @@ Bandwidth is the sum of the group's devices' download/upload over the last 24 ho
 |--------|------------|-------|----------------|
 | Group activity | "Active" | ON = traffic flowing | online_devices, active_devices, download_delta_bytes |
 | Device online | Device name from API | ON = online | ip, mac_vendor, network, last_seen, download_24h_mb, upload_24h_mb |
+| Box online | "Online" | ON = the box is online, as reported by the Firewalla MSP | — |
+
+### Box Status
+
+The box status entities sit on the Firewalla box's HA device and come from the MSP API's box record (`/v2/boxes`), the device list and the daily trends (`/v2/trends/flows`):
+
+- **Online devices** counts only devices connected to the configured box.
+- **Update rate:** the box status entities, including box online, update at the **Devices Refresh** interval (default 10 min, set in the integration's options), together with the device list, so they can lag by up to that interval. Blocked flows today updates at most every 15 minutes.
+- **Alarms** is the box's `alarmCount` as the MSP reports it. Firewalla doesn't document whether that excludes archived alarms, so it is not labelled "active".
+- **Blocked flows today** is Firewalla's latest daily point: flows blocked since midnight in the **box's** timezone (`day_start_ts` is that midnight as a Unix timestamp). Firewalla only reports this account-wide (or per box group), so the sensor is created only when the MSP account has exactly one box; with more boxes the number wouldn't be this box's. Firewalla adds the new day's point some time after local midnight (within about two hours on the account we checked), and the integration fetches trends at most every 15 minutes, so for a while after midnight the sensor still shows the previous day's total; `day_start_ts` says which day it is. Firewalla also makes small late corrections to the previous day's count, which this sensor doesn't show once the new day has started.
+- If these calls fail, only these entities go unavailable; rules and the other entities keep updating.
+
+**Not available:** WAN speed or throughput, WAN link state, and allowed-flow counts aren't in the Firewalla MSP API, so the integration doesn't provide them.
 
 ### Buttons
 
@@ -197,6 +217,8 @@ The integration uses split-polling to minimize API calls while keeping time-sens
 | All rules | Configurable (default 5 min) | ~55 KB | Block/allow status, hit counts, schedules — changes rarely |
 | Devices | Configurable (default 10 min) | ~45 KB | Online/offline, IPs, bandwidth, activity detection |
 | Users | Configurable (default 30 min) | ~2 KB | User/group names — almost never changes |
+| Box status | With the device list (default 10 min) | one record per box | Box online, public IP, firmware, total devices, alarms |
+| Blocked-flow trends | At most every 15 min | ~30 daily points | Blocked flows today |
 
 ### Time Limit Detection
 

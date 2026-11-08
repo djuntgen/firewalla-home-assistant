@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -13,6 +15,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
@@ -29,6 +32,25 @@ from .const import (
 from .coordinator import FirewallaDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def box_device_info(coordinator: FirewallaDataUpdateCoordinator) -> DeviceInfo:
+    """Device info for the configured Firewalla box (shared by its entities)."""
+    box_info = {}
+    if coordinator.data and "box_info" in coordinator.data:
+        box_info = coordinator.data["box_info"]
+
+    box_gid = box_info.get("gid", coordinator.box_gid)
+    box_name = box_info.get("name", f"Firewalla Box {box_gid[:8]}")
+    box_model = box_info.get("model", "unknown")
+
+    return DeviceInfo(
+        identifiers={(DOMAIN, box_gid)},
+        name=box_name,
+        manufacturer=DEVICE_MANUFACTURER,
+        model=DEVICE_MODEL_MAPPINGS.get(box_model, f"Firewalla {box_model.title()}"),
+        sw_version=box_info.get("version"),
+    )
 
 
 async def async_setup_entry(
@@ -58,6 +80,12 @@ async def async_setup_entry(
         except Exception as err:
             _LOGGER.error("Error creating rules summary sensor: %s", err)
 
+        entities.extend(
+            FirewallaBoxStatSensor(coordinator, description)
+            for description in BOX_STAT_SENSORS
+        )
+        entities.append(FirewallaFirmwareSensor(coordinator))
+
         if entities:
             async_add_entities(entities)
             _LOGGER.info(
@@ -70,9 +98,22 @@ async def async_setup_entry(
 
         known_time_limit_keys: set[tuple[str, str]] = set()
         known_bandwidth_gids: set[str] = set()
+        blocked_flows_added = False
 
         @callback
         def _async_update_dynamic_sensors():
+            nonlocal blocked_flows_added
+            # --- Blocked flows today: the trends endpoint is account-wide, so it
+            # is the configured box's number only when the account has one box.
+            box_stats = (coordinator.data or {}).get("box_stats")
+            if (
+                not blocked_flows_added
+                and box_stats is not None
+                and box_stats.get("box_count") == 1
+            ):
+                async_add_entities([FirewallaBlockedFlowsSensor(coordinator)])
+                blocked_flows_added = True
+
             # --- Time limit sensors ---
             current_tl_keys: set[tuple[str, str]] = set()
             if coordinator.data and "time_limits" in coordinator.data:
@@ -184,23 +225,7 @@ class FirewallaRulesSensor(CoordinatorEntity, SensorEntity):
 
     def _get_device_info(self) -> DeviceInfo:
         """Get device info for the Firewalla box."""
-        box_info = {}
-        if self.coordinator.data and "box_info" in self.coordinator.data:
-            box_info = self.coordinator.data["box_info"]
-
-        box_gid = box_info.get("gid", self.coordinator.box_gid)
-        box_name = box_info.get("name", f"Firewalla Box {box_gid[:8]}")
-        box_model = box_info.get("model", "unknown")
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, box_gid)},
-            name=box_name,
-            manufacturer=DEVICE_MANUFACTURER,
-            model=DEVICE_MODEL_MAPPINGS.get(
-                box_model, f"Firewalla {box_model.title()}"
-            ),
-            sw_version=box_info.get("version"),
-        )
+        return box_device_info(self.coordinator)
 
     @property
     def native_value(self) -> int:
@@ -476,3 +501,166 @@ class FirewallaBandwidthSensor(CoordinatorEntity, SensorEntity):
             "bytes": bytes_val,
             "mb": round(bytes_val / (1024**2), 1),
         }
+
+
+# ---------------------------------------------------------------------------
+# Box status and statistics (#13)
+# ---------------------------------------------------------------------------
+
+
+def _box_stats(coordinator: FirewallaDataUpdateCoordinator) -> dict[str, Any] | None:
+    if not coordinator.data:
+        return None
+    return coordinator.data.get("box_stats")
+
+
+@dataclass(frozen=True)
+class BoxStatDescription:
+    """One sensor read from the coordinator's ``box_stats``."""
+
+    key: str
+    name: str
+    icon: str
+    value: Callable[[dict[str, Any]], Any]
+    unit: str | None = None
+    state_class: SensorStateClass | None = None
+    entity_category: EntityCategory | None = None
+
+
+BOX_STAT_SENSORS: tuple[BoxStatDescription, ...] = (
+    BoxStatDescription(
+        key="public_ip",
+        name="Public IP",
+        icon="mdi:ip-network",
+        value=lambda stats: stats.get("public_ip"),
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    BoxStatDescription(
+        key="total_devices",
+        name="Total devices",
+        icon="mdi:devices",
+        value=lambda stats: stats.get("device_count"),
+        unit="devices",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    BoxStatDescription(
+        key="online_devices",
+        name="Online devices",
+        icon="mdi:lan-connect",
+        value=lambda stats: stats.get("online_devices"),
+        unit="devices",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    BoxStatDescription(
+        key="alarms",
+        name="Alarms",
+        icon="mdi:alarm-light",
+        value=lambda stats: stats.get("alarm_count"),
+        unit="alarms",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+)
+
+
+class FirewallaBoxStatSensor(CoordinatorEntity, SensorEntity):
+    """A status/statistics sensor on the Firewalla box's HA device."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: FirewallaDataUpdateCoordinator,
+        description: BoxStatDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self._description = description
+        self._attr_unique_id = f"firewalla_box_{coordinator.box_gid}_{description.key}"
+        self._attr_name = description.name
+        self._attr_icon = description.icon
+        self._attr_native_unit_of_measurement = description.unit
+        self._attr_state_class = description.state_class
+        self._attr_entity_category = description.entity_category
+        self._attr_device_info = box_device_info(coordinator)
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and (
+            _box_stats(self.coordinator) is not None
+        )
+
+    @property
+    def native_value(self) -> Any:
+        stats = _box_stats(self.coordinator)
+        return self._description.value(stats) if stats is not None else None
+
+
+class FirewallaFirmwareSensor(FirewallaBoxStatSensor):
+    """Firmware version; also keeps the box HA device's ``sw_version`` current."""
+
+    def __init__(self, coordinator: FirewallaDataUpdateCoordinator) -> None:
+        super().__init__(
+            coordinator,
+            BoxStatDescription(
+                key="firmware",
+                name="Firmware version",
+                icon="mdi:chip",
+                value=lambda stats: stats.get("version"),
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+        )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        version = self.native_value
+        if version and self.registry_entry and self.registry_entry.device_id:
+            dev_reg = dr.async_get(self.hass)
+            device = dev_reg.async_get(self.registry_entry.device_id)
+            if device and device.sw_version != version:
+                dev_reg.async_update_device(device.id, sw_version=version)
+        super()._handle_coordinator_update()
+
+
+class FirewallaBlockedFlowsSensor(CoordinatorEntity, SensorEntity):
+    """Blocked flows in the box's current local day (latest daily trend point).
+
+    Firewalla's ``ts`` is the start of that day in the box's own timezone; it is
+    passed through as-is, not reinterpreted in Home Assistant's timezone.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Blocked flows today"
+    _attr_icon = "mdi:shield-off"
+    _attr_native_unit_of_measurement = "flows"
+    _attr_state_class = SensorStateClass.TOTAL
+
+    def __init__(self, coordinator: FirewallaDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"firewalla_box_{coordinator.box_gid}_blocked_flows"
+        self._attr_device_info = box_device_info(coordinator)
+
+    def _point(self) -> dict[str, Any] | None:
+        stats = _box_stats(self.coordinator)
+        if stats is None or stats.get("box_count") != 1:
+            return None
+        return stats.get("blocked_flows")
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self._point() is not None
+
+    @property
+    def native_value(self) -> Any:
+        point = self._point()
+        return point.get("value") if point else None
+
+    @property
+    def last_reset(self) -> datetime | None:
+        point = self._point()
+        if not point:
+            return None
+        return datetime.fromtimestamp(point["ts"], tz=timezone.utc)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        point = self._point()
+        return {"day_start_ts": point["ts"]} if point else {}
