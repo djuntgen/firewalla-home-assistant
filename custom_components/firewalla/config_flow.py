@@ -434,13 +434,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         # Set up before v1.2.1 without its box (#24). One box
                         # is repaired at setup; with several, the user chooses.
                         boxes = await _async_fetch_boxes(client)
-                        if len(boxes) > 1 and not _repair_in_progress(self.hass, entry):
+                        if _repair_in_progress(self.hass, entry):
+                            # Its box is pinned; the credentials must reach it.
+                            if entry.data.get(CONF_PENDING_BOX_GID) not in boxes:
+                                errors["base"] = "box_not_found"
+                            else:
+                                return self.async_update_reload_and_abort(
+                                    entry, data={**entry.data, **credentials}
+                                )
+                        elif len(boxes) > 1:
                             self._available_boxes = boxes
                             self._reconfigure_credentials = credentials
                             return await self.async_step_reconfigure_box()
-                        return self.async_update_reload_and_abort(
-                            entry, data={**entry.data, **credentials}
-                        )
+                        else:
+                            return self.async_update_reload_and_abort(
+                                entry, data={**entry.data, **credentials}
+                            )
                     elif entry.data.get(CONF_BOX_GID) not in await _async_fetch_boxes(
                         client
                     ):

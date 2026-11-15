@@ -731,3 +731,40 @@ async def test_reconfigure_keeps_pinned_box_of_unfinished_repair(hass, api):
     assert entry.data[CONF_BOX_GID] == BOX
     assert not any(OTHER in uid for uid in _uid_to_entity_id(hass))
     await _unload(hass, entry)
+
+
+async def test_reconfigure_unfinished_repair_needs_the_pinned_box(hass, api):
+    """Credentials for an account without the pinned box are refused and not
+    saved (found in review of ccb122c)."""
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    boxes.status = 200
+    real_update = hass.config_entries.async_update_entry
+
+    def fail_on_repair(entry_, **kwargs):
+        if kwargs.get("unique_id") == BOX:
+            raise RuntimeError("interrupted")
+        return real_update(entry_, **kwargs)
+
+    with patch.object(hass.config_entries, "async_update_entry", fail_on_repair):
+        await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    data_before = dict(entry.data)
+
+    boxes.payload = [OTHER_RECORD]
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_MSP_URL: DOMAIN_NAME, CONF_ACCESS_TOKEN: "another-token-0123456789"},
+    )
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "box_not_found"}
+    assert dict(entry.data) == data_before
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
