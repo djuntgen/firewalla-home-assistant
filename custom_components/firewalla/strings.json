@@ -50,6 +50,7 @@
     },
     "abort": {
       "already_configured": "This Firewalla box is already configured. Each box can only be configured once.",
+      "box_identity_changed": "This entry's box was being set while this form was open. Open Reconfigure again.",
       "invalid_host": "The provided MSP URL is not valid. Please check the URL format.",
       "auth_failed": "Authentication with the Firewalla MSP API failed. Please check your credentials."
     }

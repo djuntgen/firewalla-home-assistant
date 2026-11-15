@@ -491,6 +491,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             box_gid = user_input[CONF_BOX_GID]
+            if entry.data.get(CONF_BOX_GID) != LEGACY_BOX_GID or _repair_in_progress(
+                self.hass, entry
+            ):
+                # A setup retry started (or finished) the repair while the form
+                # was open: its pinned box must not be replaced.
+                return self.async_abort(reason="box_identity_changed")
             if box_gid not in self._available_boxes:
                 errors["base"] = "no_boxes"
             elif any(

@@ -768,3 +768,31 @@ async def test_reconfigure_unfinished_repair_needs_the_pinned_box(hass, api):
     assert dict(entry.data) == data_before
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
+
+
+async def test_reconfigure_box_choice_rechecks_repair_on_submit(hass, api):
+    """A repair that starts while the box form is open keeps its pinned box
+    (race found in architect review of e36a5bc)."""
+    entry, boxes = await _install_v120(hass, api)
+    online = _uid_to_entity_id(hass)["firewalla_box_default_online"]
+    # Unloaded, so the simulated repair below doesn't trigger a reload.
+    await _unload(hass, entry)
+    boxes.payload, boxes.status = [BOX_RECORD, OTHER_RECORD], 200
+    result = await _reconfigure(hass, entry)
+    assert result["step_id"] == "reconfigure_box"
+
+    # Meanwhile a setup retry pins BOX and moves a record.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_PENDING_BOX_GID: BOX}
+    )
+    er.async_get(hass).async_update_entity(
+        online, new_unique_id=f"firewalla_box_{BOX}_online"
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BOX_GID: OTHER}
+    )
+    assert result["type"] == "abort"
+    assert result["reason"] == "box_identity_changed"
+    assert entry.data[CONF_PENDING_BOX_GID] == BOX
+    assert entry.data[CONF_ACCESS_TOKEN] == TOKEN
