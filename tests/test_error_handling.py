@@ -329,7 +329,7 @@ class TestConfigFlowErrorHandling:
         flow._access_token = "valid_token"
 
         mock_client = AsyncMock()
-        mock_client.get_rules.return_value = None
+        mock_client.get_boxes.return_value = None
 
         with patch(
             "custom_components.firewalla.config_flow.FirewallaMSPClient",
@@ -349,9 +349,8 @@ class TestConfigFlowErrorHandling:
         flow._msp_domain = "test.firewalla.com"
         flow._access_token = "valid_token"
 
-        # Mock successful rules response
         mock_client = AsyncMock()
-        mock_client.get_rules.return_value = {"results": [], "count": 0}
+        mock_client.get_boxes.return_value = [{"gid": "box-1", "name": "Home"}]
 
         with patch(
             "custom_components.firewalla.config_flow.FirewallaMSPClient",
@@ -360,9 +359,7 @@ class TestConfigFlowErrorHandling:
 
             await flow._get_available_boxes()
 
-            # Should create a default box entry
-            assert len(flow._available_boxes) == 1
-            assert "default" in flow._available_boxes
+            assert list(flow._available_boxes) == ["box-1"]
 
 
 class TestEntityErrorHandling:

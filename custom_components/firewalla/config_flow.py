@@ -18,20 +18,23 @@ from typing import Any, Dict, Optional
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResult
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BASE_POLL_INTERVAL,
     CONF_BOX_GID,
+    CONF_BOX_MODEL,
+    CONF_BOX_NAME,
     CONF_DASHBOARD_USERS,
     CONF_DEVICES_INTERVAL,
     CONF_EXCLUDE_FILTERS,
     CONF_FULL_RULES_INTERVAL,
     CONF_INCLUDE_FILTERS,
     CONF_MSP_URL,
+    CONF_PENDING_BOX_GID,
     CONF_USERS_CACHE_TTL,
     DEFAULT_BASE_POLL_INTERVAL,
     DEFAULT_DEVICES_INTERVAL,
@@ -39,13 +42,43 @@ from .const import (
     DEFAULT_MSP_URL_FORMAT,
     DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
+    LEGACY_BOX_GID,
 )
-from .coordinator import FirewallaMSPClient
+from .coordinator import FirewallaMSPClient, box_display_name, boxes_by_gid
 
 _LOGGER = logging.getLogger(__name__)
 
 # MSP URL validation pattern
 MSP_URL_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9]\.firewalla\.net$")
+
+
+def _normalize_msp_domain(msp_domain: Any) -> str:
+    """mydomain.firewalla.net from any accepted spelling of an MSP URL."""
+    domain = str(msp_domain or "").strip().lower()
+    if "://" in domain:
+        domain = domain.split("://", 1)[1]
+    return domain.split("/", 1)[0]
+
+
+def _same_msp_domain(first: Any, second: Any) -> bool:
+    return _normalize_msp_domain(first) == _normalize_msp_domain(second)
+
+
+async def _async_fetch_boxes(client: FirewallaMSPClient) -> Dict[str, Any]:
+    """The account's boxes from /v2/boxes, keyed by gid.
+
+    Raises InvalidAuth or CannotConnect when the list can't be fetched.
+    """
+    try:
+        response = await client.get_boxes()
+    except ConfigEntryAuthFailed as err:
+        raise InvalidAuth(f"Cannot list boxes: {err}") from err
+    except HomeAssistantError as err:
+        raise CannotConnect(f"Cannot list boxes: {err}") from err
+    boxes = boxes_by_gid(response)
+    if not boxes and response:
+        _LOGGER.warning("MSP /v2/boxes response has no usable box records")
+    return boxes
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -59,6 +92,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._access_token: Optional[str] = None
         self._available_boxes: Dict[str, Any] = {}
         self._user_input: Dict[str, Any] = {}  # Preserve user input on failures
+        self._reconfigure_credentials: Dict[str, Any] = {}
 
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -113,40 +147,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         return await self.async_step_box_selection()
                     elif len(self._available_boxes) == 1:
                         # Only one box, use it directly
-                        box_gid = list(self._available_boxes.keys())[0]
-                        box_info = self._available_boxes[box_gid]
-                        box_name = box_info.get(
-                            "name", f"Firewalla {box_info.get('model', 'Box')}"
-                        )
-
-                        _LOGGER.debug(
-                            "Only one box found, using it directly: %s", box_name
-                        )
-
-                        # Test rule access before completing setup
-                        await self._test_rule_access()
-
-                        # Check if this box is already configured
-                        await self.async_set_unique_id(box_gid)
-                        self._abort_if_unique_id_configured()
-
-                        # Create the config entry
-                        _LOGGER.info(
-                            "Successfully configured Firewalla integration for %s",
-                            box_name,
-                        )
-                        return self.async_create_entry(
-                            title=box_name,
-                            data={
-                                CONF_MSP_URL: self._msp_domain,
-                                CONF_ACCESS_TOKEN: self._access_token,
-                                CONF_BOX_GID: box_gid,
-                            },
-                        )
+                        box_gid = next(iter(self._available_boxes))
+                        _LOGGER.debug("Only one box found, using it directly")
+                        return await self._async_create_box_entry(box_gid)
                     else:
                         _LOGGER.warning("No boxes found in MSP account")
                         errors["base"] = "no_boxes"
 
+            except AbortFlow:
+                raise
             except InvalidAuth as err:
                 _LOGGER.error("MSP authentication failed: %s", err)
                 errors["base"] = "auth_failed"
@@ -191,34 +200,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.error("Selected box GID %s not in available boxes", box_gid)
                     errors["base"] = "no_boxes"
                 else:
-                    box_info = self._available_boxes[box_gid]
-                    box_name = box_info.get(
-                        "name", f"Firewalla {box_info.get('model', 'Box')}"
-                    )
-
-                    _LOGGER.debug(
-                        "Creating config entry for box %s (GID: %s)", box_name, box_gid
-                    )
-
-                    # Test rule access before completing setup
-                    await self._test_rule_access()
-
-                    # Check if this box is already configured
-                    await self.async_set_unique_id(box_gid)
-                    self._abort_if_unique_id_configured()
-
-                    # Create the config entry
-                    _LOGGER.info(
-                        "Successfully configured Firewalla integration for %s", box_name
-                    )
-                    return self.async_create_entry(
-                        title=box_name,
-                        data={
-                            CONF_MSP_URL: self._msp_domain,
-                            CONF_ACCESS_TOKEN: self._access_token,
-                            CONF_BOX_GID: box_gid,
-                        },
-                    )
+                    return await self._async_create_box_entry(box_gid)
+            except AbortFlow:
+                raise
             except RuleAccessFailed as err:
                 _LOGGER.error("Cannot access rules: %s", err)
                 errors["base"] = "rule_access_failed"
@@ -227,11 +211,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown_error"
 
         # Create box selection options
-        box_options = {}
-        for gid, box_info in self._available_boxes.items():
-            box_name = box_info.get("name", f"Firewalla {box_info.get('model', 'Box')}")
-            box_model = box_info.get("model", "Unknown")
-            box_options[gid] = f"{box_name} ({box_model})"
+        box_options = self._box_options()
 
         if not box_options:
             # No boxes available, return to user step with error
@@ -325,42 +305,46 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 f"Authentication failed due to unexpected error: {err}"
             ) from err
 
+    async def _async_create_box_entry(self, box_gid: str) -> FlowResult:
+        """Create the config entry for a box discovered in /v2/boxes."""
+        box_info = self._available_boxes[box_gid]
+        box_name = box_display_name(box_info)
+        box_model = box_info.get("model")
+
+        # Test rule access before completing setup
+        await self._test_rule_access()
+
+        # Check if this box is already configured
+        await self.async_set_unique_id(box_gid)
+        self._abort_if_unique_id_configured()
+        # An entry from before v1.2.1 still holding the placeholder gid (#24)
+        # may be this same box: setup repairs it, so don't add a second one.
+        for entry in self._async_current_entries(include_ignore=False):
+            if entry.data.get(CONF_BOX_GID) == LEGACY_BOX_GID and _same_msp_domain(
+                entry.data.get(CONF_MSP_URL), self._msp_domain
+            ):
+                return self.async_abort(reason="already_configured")
+
+        _LOGGER.info("Successfully configured Firewalla integration for %s", box_name)
+        data = {
+            CONF_MSP_URL: self._msp_domain,
+            CONF_ACCESS_TOKEN: self._access_token,
+            CONF_BOX_GID: box_gid,
+            CONF_BOX_NAME: box_name,
+        }
+        if isinstance(box_model, str) and box_model:
+            data[CONF_BOX_MODEL] = box_model
+        return self.async_create_entry(title=box_name, data=data)
+
     async def _get_available_boxes(self) -> None:
-        """Get available Firewalla boxes from MSP account."""
+        """Get the Firewalla boxes in the MSP account from /v2/boxes."""
         if not self._msp_domain or not self._access_token:
             raise InvalidAuth("MSP domain and access token are required")
 
-        try:
-            session = async_get_clientsession(self.hass)
-            client = FirewallaMSPClient(session, self._msp_domain, self._access_token)
-
-            # Get list of boxes - for now we'll use rules endpoint to test access
-            # since the official examples don't show a boxes endpoint
-            _LOGGER.debug("Testing MSP API access by fetching rules")
-            rules_response = await client.get_rules()
-
-            if rules_response is not None:
-                # If we can access rules, create a dummy box entry
-                # In a real implementation, we'd use the actual boxes endpoint
-                self._available_boxes = {
-                    "default": {
-                        "gid": "default",
-                        "name": "Firewalla Box",
-                        "model": "Unknown",
-                        "online": True,
-                    }
-                }
-                _LOGGER.info("Successfully accessed MSP API rules endpoint")
-            else:
-                _LOGGER.warning("No response from MSP API rules endpoint")
-                self._available_boxes = {}
-
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Cannot connect to MSP API: %s", err)
-            raise CannotConnect(f"Cannot connect to MSP API: {err}") from err
-        except Exception as err:
-            _LOGGER.error("Unexpected error getting boxes: %s", err)
-            raise HomeAssistantError(f"Failed to get boxes: {err}") from err
+        session = async_get_clientsession(self.hass)
+        client = FirewallaMSPClient(session, self._msp_domain, self._access_token)
+        self._available_boxes = await _async_fetch_boxes(client)
+        _LOGGER.debug("Found %d boxes in MSP account", len(self._available_boxes))
 
     async def _test_rule_access(self) -> None:
         """Test rule access permissions using /v2/rules endpoint."""
@@ -428,17 +412,34 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 try:
                     session = async_get_clientsession(self.hass)
                     client = FirewallaMSPClient(session, msp_domain, access_token)
-                    if await client.authenticate():
-                        return self.async_update_reload_and_abort(
-                            entry,
-                            data={
-                                **entry.data,
-                                CONF_MSP_URL: msp_domain,
-                                CONF_ACCESS_TOKEN: access_token,
-                            },
-                        )
-                    else:
+                    credentials = {
+                        CONF_MSP_URL: msp_domain,
+                        CONF_ACCESS_TOKEN: access_token,
+                    }
+                    if not await client.authenticate():
                         errors["base"] = "auth_failed"
+                    elif entry.data.get(CONF_BOX_GID) == LEGACY_BOX_GID:
+                        # Set up before v1.2.1 without its box (#24). One box
+                        # is repaired at setup; with several, the user chooses.
+                        boxes = await _async_fetch_boxes(client)
+                        if len(boxes) > 1:
+                            self._available_boxes = boxes
+                            self._reconfigure_credentials = credentials
+                            return await self.async_step_reconfigure_box()
+                        return self.async_update_reload_and_abort(
+                            entry, data={**entry.data, **credentials}
+                        )
+                    elif entry.data.get(CONF_BOX_GID) not in await _async_fetch_boxes(
+                        client
+                    ):
+                        # The credentials must still reach the configured box.
+                        errors["base"] = "box_not_found"
+                    else:
+                        return self.async_update_reload_and_abort(
+                            entry, data={**entry.data, **credentials}
+                        )
+                except InvalidAuth:
+                    errors["base"] = "auth_failed"
                 except Exception:
                     errors["base"] = "connection_failed"
 
@@ -455,6 +456,51 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+    async def async_step_reconfigure_box(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Choose the box for an entry set up without one, on a multi-box account.
+
+        The choice is saved for the repair at the next setup, which moves the
+        entry's entities and device onto that box in place (#24).
+        """
+        errors: Dict[str, str] = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
+        if user_input is not None:
+            box_gid = user_input[CONF_BOX_GID]
+            if box_gid not in self._available_boxes:
+                errors["base"] = "no_boxes"
+            elif any(
+                other.entry_id != entry.entry_id and other.unique_id == box_gid
+                for other in self.hass.config_entries.async_entries(DOMAIN)
+            ):
+                errors["base"] = "box_already_configured"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data={
+                        **entry.data,
+                        **self._reconfigure_credentials,
+                        CONF_PENDING_BOX_GID: box_gid,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure_box",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_BOX_GID): vol.In(self._box_options())}
+            ),
+            errors=errors,
+        )
+
+    def _box_options(self) -> Dict[str, str]:
+        """Labels for choosing among ``self._available_boxes``."""
+        return {
+            gid: f"{box_display_name(box)} ({box.get('model') or 'Unknown'})"
+            for gid, box in self._available_boxes.items()
+        }
 
     @staticmethod
     @config_entries.HANDLERS.register(DOMAIN)

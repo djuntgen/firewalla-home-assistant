@@ -1,0 +1,180 @@
+"""Repair config entries that setup saved with a placeholder box gid (#24).
+
+Before v1.2.1 the config flow saved the gid ``"default"`` instead of the real
+gid from /v2/boxes. That gid is part of the box entities' unique_ids and of the
+box device's identifier, so it is repaired in the registries, in place.
+
+This runs from ``async_setup_entry`` rather than ``async_migrate_entry``:
+raising ConfigEntryNotReady from a migration (to retry when the API is down)
+is only supported on recent Home Assistant releases, and this integration
+supports older ones.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+
+from .const import (
+    CONF_BOX_GID,
+    CONF_BOX_MODEL,
+    CONF_BOX_NAME,
+    CONF_PENDING_BOX_GID,
+    DOMAIN,
+    LEGACY_BOX_GID,
+    LEGACY_BOX_TITLE,
+)
+from .coordinator import FirewallaMSPClient, box_display_name, boxes_by_gid
+
+_LOGGER = logging.getLogger(__name__)
+
+_LEGACY_REFRESH_UID = f"firewalla_{LEGACY_BOX_GID}_refresh"
+_LEGACY_BOX_UID_PREFIX = f"firewalla_box_{LEGACY_BOX_GID}_"
+
+
+def _repaired_unique_id(unique_id: str, box_gid: str) -> str | None:
+    """The unique_id an entity of the placeholder box has on the real box.
+
+    None for unique_ids that don't contain the box gid (rules, groups, devices,
+    time limits and the rules summary).
+    """
+    if unique_id == _LEGACY_REFRESH_UID:
+        return f"firewalla_{box_gid}_refresh"
+    if unique_id.startswith(_LEGACY_BOX_UID_PREFIX):
+        return f"firewalla_box_{box_gid}_{unique_id[len(_LEGACY_BOX_UID_PREFIX):]}"
+    return None
+
+
+async def async_repair_legacy_box_identity(
+    hass: HomeAssistant, entry: ConfigEntry, client: FirewallaMSPClient
+) -> None:
+    """Move an entry saved with the placeholder gid onto its real box.
+
+    The box is the one chosen in Reconfigure, else the account's only box,
+    which must then be the one the entry was set up for. A multi-box account
+    without a choice is left alone. Entity and device records are updated
+    rather than recreated, so entity_ids, device ids, user customizations and
+    child-device links survive.
+
+    Anything else changes nothing: the entry keeps running on the placeholder
+    (rules, groups and devices work; the box status entities stay
+    unavailable), and the repair is tried again at the next setup. Updates go
+    entities, then device, then entry, so a retry after an interruption finds
+    nothing left to move but the remainder.
+    """
+    if entry.data.get(CONF_BOX_GID) != LEGACY_BOX_GID:
+        return
+
+    try:
+        boxes = boxes_by_gid(await client.get_boxes())
+    except Exception as err:  # noqa: BLE001 — never block setup over this
+        _LOGGER.warning(
+            "Could not list Firewalla boxes to repair this entry's box identity "
+            "(#24); box status stays unavailable until it is retried at the next "
+            "start: %s",
+            err,
+        )
+        return
+    chosen = entry.data.get(CONF_PENDING_BOX_GID)
+    if chosen:
+        if chosen not in boxes:
+            _LOGGER.warning(
+                "The Firewalla box chosen in Reconfigure is not in this account's "
+                "/v2/boxes; nothing was changed. Choose it again in Reconfigure"
+            )
+            return
+        box_gid = chosen
+    elif len(boxes) == 1:
+        box_gid = next(iter(boxes))
+    else:
+        _LOGGER.warning(
+            "This Firewalla entry was set up before v1.2.1 without its box's id "
+            "(#24), and the account has %d boxes. Rules, groups and devices keep "
+            "working; to load the box status entities, choose the box in "
+            "Settings > Devices & services > Firewalla > Reconfigure",
+            len(boxes),
+        )
+        return
+    record = boxes[box_gid]
+
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    collisions: list[str] = []
+
+    for other in hass.config_entries.async_entries(DOMAIN):
+        if other.entry_id != entry.entry_id and other.unique_id == box_gid:
+            collisions.append(f"config entry {other.entry_id} already has the box")
+
+    entity_moves: dict[str, str] = {}
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if entity.platform != DOMAIN:
+            continue
+        new_unique_id = _repaired_unique_id(entity.unique_id, box_gid)
+        if new_unique_id is None:
+            continue
+        existing = ent_reg.async_get_entity_id(entity.domain, DOMAIN, new_unique_id)
+        if existing is not None:
+            collisions.append(f"{existing} already has unique_id {new_unique_id}")
+        entity_moves[entity.entity_id] = new_unique_id
+
+    legacy_device = dev_reg.async_get_device(identifiers={(DOMAIN, LEGACY_BOX_GID)})
+    real_device = dev_reg.async_get_device(identifiers={(DOMAIN, box_gid)})
+    if legacy_device is not None:
+        if entry.entry_id not in legacy_device.config_entries:
+            collisions.append(f"device {legacy_device.id} belongs to another entry")
+        if real_device is not None and real_device.id != legacy_device.id:
+            collisions.append(f"device {real_device.id} already has the box")
+
+    if collisions:
+        _LOGGER.warning(
+            "Not repairing this Firewalla entry's box identity (#24), nothing was "
+            "changed: %s. Box status stays unavailable",
+            "; ".join(collisions),
+        )
+        return
+
+    box_name = box_display_name(record)
+    data: dict[str, Any] = {
+        **entry.data,
+        CONF_BOX_GID: box_gid,
+        CONF_BOX_NAME: box_name,
+    }
+    data.pop(CONF_PENDING_BOX_GID, None)
+    box_model = record.get("model")
+    if isinstance(box_model, str) and box_model:
+        data[CONF_BOX_MODEL] = box_model
+
+    try:
+        for entity_id, new_unique_id in entity_moves.items():
+            ent_reg.async_update_entity(entity_id, new_unique_id=new_unique_id)
+        if legacy_device is not None:
+            dev_reg.async_update_device(
+                legacy_device.id,
+                new_identifiers=(legacy_device.identifiers - {(DOMAIN, LEGACY_BOX_GID)})
+                | {(DOMAIN, box_gid)},
+            )
+        hass.config_entries.async_update_entry(
+            entry,
+            data=data,
+            unique_id=box_gid,
+            # Keep a title the user chose; replace only the placeholder's.
+            title=box_name if entry.title == LEGACY_BOX_TITLE else entry.title,
+        )
+    except Exception as err:
+        # Part of the repair may be done. Setting up the platforms now would
+        # recreate the moved entities under the placeholder gid, so retry the
+        # whole setup instead: the retry moves only what is left.
+        raise ConfigEntryNotReady(
+            f"Interrupted while repairing the box identity (#24): {err}"
+        ) from err
+    _LOGGER.info(
+        "Repaired this Firewalla entry's box identity (#24): %d entities and "
+        "the box device now use the real box id",
+        len(entity_moves),
+    )

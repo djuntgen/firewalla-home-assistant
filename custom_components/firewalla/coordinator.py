@@ -24,6 +24,7 @@ from .const import (
     DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
     FLOW_TRENDS_INTERVAL,
+    LEGACY_BOX_TITLE,
     MSP_API_V2_BASE,
     RETRY_ATTEMPTS,
     RETRY_DELAYS,
@@ -313,6 +314,32 @@ def _build_time_limits(
     return time_limits
 
 
+def boxes_by_gid(response: Any) -> dict[str, dict[str, Any]]:
+    """The usable boxes in a ``/v2/boxes`` response, keyed by gid.
+
+    Skips anything that is not a box record with a non-empty string gid. If a
+    gid repeats, the first record wins.
+    """
+    boxes: dict[str, dict[str, Any]] = {}
+    if not isinstance(response, list):
+        return boxes
+    for record in response:
+        if not isinstance(record, dict):
+            continue
+        gid = record.get("gid")
+        if isinstance(gid, str) and gid.strip() and gid not in boxes:
+            boxes[gid] = record
+    return boxes
+
+
+def box_display_name(record: dict[str, Any]) -> str:
+    """The name to show for a ``/v2/boxes`` record."""
+    name = record.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return LEGACY_BOX_TITLE
+
+
 class FirewallaMSPClient:
     """Client for Firewalla MSP API communication focused on rule management."""
 
@@ -600,10 +627,18 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         full_rules_interval: int = DEFAULT_FULL_RULES_INTERVAL,
         devices_interval: int = DEFAULT_DEVICES_INTERVAL,
         users_cache_ttl: int = DEFAULT_USERS_CACHE_TTL,
+        box_name: Optional[str] = None,
+        box_model: Optional[str] = None,
     ) -> None:
-        """Initialize the coordinator."""
+        """Initialize the coordinator.
+
+        ``box_name`` and ``box_model`` are the metadata setup saved from
+        /v2/boxes; they name the box device while /v2/boxes can't be fetched.
+        """
         self.api = FirewallaMSPClient(session, msp_domain, access_token)
         self.box_gid = box_gid
+        self._saved_box_name = box_name or f"Firewalla Box {box_gid[:8]}"
+        self._saved_box_model = box_model
         self._previous_rules = {}
         self._previous_group_downloads: dict[str, int] = {}
         self._last_active_times: dict[str, float] = {}
@@ -748,11 +783,7 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
                 "rule_count": rule_stats,
                 "rule_changes": rule_changes,
                 "last_updated": self.last_update_success,
-                "box_info": {
-                    "gid": self.box_gid,
-                    "name": f"Firewalla Box {self.box_gid[:8]}",
-                    "online": True,  # Assume online if we can fetch data
-                },
+                "box_info": self._box_info(),
                 "groups": groups_data,
                 "time_limits": time_limits_data,
                 "box_stats": box_stats,
@@ -785,6 +816,21 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(
                 f"Unexpected error communicating with MSP API: {err}"
             ) from err
+
+    def _box_info(self) -> Dict[str, Any]:
+        """Box device metadata: the last /v2/boxes record, else what setup saved."""
+        box = self._cached_box or {}
+        info: Dict[str, Any] = {
+            "gid": self.box_gid,
+            "name": box_display_name(box) if box else self._saved_box_name,
+            "online": True,  # Assume online if we can fetch data
+        }
+        model = box.get("model")
+        if not (isinstance(model, str) and model):
+            model = self._saved_box_model
+        if model:
+            info["model"] = model
+        return info
 
     async def _async_fetch_box_stats(
         self, devices: list, now: float, refresh_box: bool
@@ -831,16 +877,8 @@ class FirewallaDataUpdateCoordinator(DataUpdateCoordinator):
         """Fetch the configured box's record from /v2/boxes, or None on failure."""
         try:
             async with asyncio.timeout(BOX_STATS_TIMEOUT):
-                boxes = await self.api.get_boxes()
-            boxes = boxes if isinstance(boxes, list) else []
-            box = next(
-                (
-                    b
-                    for b in boxes
-                    if isinstance(b, dict) and b.get("gid") == self.box_gid
-                ),
-                None,
-            )
+                boxes = boxes_by_gid(await self.api.get_boxes())
+            box = boxes.get(self.box_gid)
             if box is None:
                 raise HomeAssistantError(f"box {self.box_gid} not in /v2/boxes")
         except Exception as err:  # noqa: BLE001 — must not break rule updates

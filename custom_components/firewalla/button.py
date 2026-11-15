@@ -11,8 +11,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DEVICE_MANUFACTURER, DOMAIN
+from .const import DOMAIN
 from .coordinator import FirewallaDataUpdateCoordinator
+from .sensor import box_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,14 +45,7 @@ class FirewallaRefreshButton(CoordinatorEntity, ButtonEntity):
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info to link to the main Firewalla box device."""
-        box_info = (
-            self.coordinator.data.get("box_info", {}) if self.coordinator.data else {}
-        )
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.coordinator.box_gid)},
-            name=box_info.get("name", f"Firewalla Box {self.coordinator.box_gid[:8]}"),
-            manufacturer=DEVICE_MANUFACTURER,
-        )
+        return box_device_info(self.coordinator)
 
     async def async_press(self) -> None:
         """Handle the button press — trigger a full refresh of all MSP API data."""

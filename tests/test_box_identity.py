@@ -1,0 +1,624 @@
+"""Real box identity (#24): setup must save the gid that box statistics look up.
+
+The MSP API is mocked only at the HTTP layer (aioresponses), so the config flow,
+the client, the coordinator and the platforms all run for real. The v1.2.0 tests
+missed #24 because setup and statistics were each tested with invented gids
+that happened to agree.
+"""
+
+import logging
+import re
+from unittest.mock import patch
+
+import aiohttp
+import pytest
+from aioresponses import CallbackResult, aioresponses
+from homeassistant import config_entries
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.firewalla.const import (
+    CONF_ACCESS_TOKEN,
+    CONF_BOX_GID,
+    CONF_BOX_MODEL,
+    CONF_BOX_NAME,
+    CONF_MSP_URL,
+    CONF_PENDING_BOX_GID,
+    DOMAIN,
+    LEGACY_BOX_GID,
+    LEGACY_BOX_TITLE,
+)
+
+DOMAIN_NAME = "testbox.firewalla.net"
+BASE = f"https://{DOMAIN_NAME}/v2"
+RULES_URL = re.compile(r"^https://testbox\.firewalla\.net/v2/rules(\?.*)?$")
+TOKEN = "test-token-0123456789"
+
+BOX = "3a7c9f1e-real-box-gid"
+BOX_RECORD = {
+    "gid": BOX,
+    "name": "Home",
+    "model": "gold_pro",
+    "online": True,
+    "version": "1.982",
+    "publicIP": "203.0.113.7",
+    "deviceCount": 181,
+    "ruleCount": 103,
+    "alarmCount": 470,
+}
+OTHER = "9d41b2c0-other-box-gid"
+OTHER_RECORD = {**BOX_RECORD, "gid": OTHER, "name": "Cabin", "model": "purple"}
+TRENDS = [{"ts": 1793595600, "value": 345}]
+# Unique_id suffixes of the box entities a v1.2.0 install has (blocked_flows is
+# only created once the box count is known to be 1, so a legacy entry never had it).
+LEGACY_BOX_KEYS = (
+    "online",
+    "public_ip",
+    "firmware",
+    "total_devices",
+    "online_devices",
+    "alarms",
+)
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations):
+    """Load custom_components/firewalla as a real integration."""
+    yield
+
+
+@pytest.fixture
+async def session():
+    # ThreadedResolver: the default aiodns resolver leaves a pycares thread
+    # behind, which the HA test harness rejects. aioresponses answers every
+    # request, so nothing is resolved or connected either way.
+    connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+    async with aiohttp.ClientSession(connector=connector) as s:
+        yield s
+
+
+@pytest.fixture
+def api(session):
+    """MSP API at the HTTP boundary; every module shares the one session."""
+    with (
+        aioresponses() as m,
+        patch(
+            "custom_components.firewalla.config_flow.async_get_clientsession",
+            return_value=session,
+        ),
+        patch(
+            "custom_components.firewalla.async_get_clientsession",
+            return_value=session,
+        ),
+    ):
+        m.get(RULES_URL, payload={"results": [], "count": 0}, repeat=True)
+        m.get(f"{BASE}/devices", payload=[], repeat=True)
+        m.get(f"{BASE}/users", payload=[], repeat=True)
+        m.get(f"{BASE}/trends/flows", payload=TRENDS, repeat=True)
+        yield m
+
+
+def _box_entity_id(hass, key):
+    """entity_id of this integration's box entity whose unique_id ends in key."""
+    ent_reg = er.async_get(hass)
+    matches = [
+        e.entity_id
+        for e in ent_reg.entities.values()
+        if e.platform == DOMAIN
+        and e.unique_id.startswith("firewalla_box_")
+        and e.unique_id.endswith(f"_{key}")
+    ]
+    assert len(matches) == 1, matches
+    return matches[0]
+
+
+async def test_setup_then_box_statistics_join(hass, api):
+    """#24: the gid the config flow saves is the gid statistics find in /v2/boxes."""
+    api.get(f"{BASE}/boxes", payload=[BOX_RECORD], repeat=True)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_MSP_URL: DOMAIN_NAME, CONF_ACCESS_TOKEN: TOKEN}
+    )
+    assert result["type"] == "create_entry", result
+    await hass.async_block_till_done()
+
+    entry = result["result"]
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+
+    # The reported symptom: box entities stay unavailable on every start.
+    online = hass.states.get(_box_entity_id(hass, "online"))
+    assert online is not None
+    assert online.state == "on"
+    assert hass.states.get(_box_entity_id(hass, "public_ip")).state == "203.0.113.7"
+    assert hass.states.get(_box_entity_id(hass, "alarms")).state == "470"
+
+    # And the cause: setup saved the real gid, not a placeholder.
+    assert entry.data[CONF_BOX_GID] == BOX
+    assert entry.unique_id == BOX
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for the discovery and upgrade tests
+# ---------------------------------------------------------------------------
+
+
+class BoxesEndpoint:
+    """/v2/boxes whose answer a test can change between setups."""
+
+    def __init__(self, api, payload, status=200):
+        self.payload = payload
+        self.status = status
+        api.get(f"{BASE}/boxes", callback=self, repeat=True)
+
+    def __call__(self, url, **kwargs):
+        if self.status != 200:
+            return CallbackResult(status=self.status, body="unavailable")
+        return CallbackResult(status=200, payload=self.payload)
+
+
+@pytest.fixture
+def no_setup():
+    """Config-flow-only tests: don't set up the entry the flow creates."""
+    with patch("custom_components.firewalla.async_setup_entry", return_value=True):
+        yield
+
+
+def _add_entry(hass, gid, title, unique_id=None, msp=DOMAIN_NAME, **data):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title=title,
+        unique_id=gid if unique_id is None else unique_id,
+        data={CONF_MSP_URL: msp, CONF_ACCESS_TOKEN: TOKEN, CONF_BOX_GID: gid, **data},
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _legacy_entry(hass, **kwargs):
+    """A config entry exactly as v1.2.0 setup saved it."""
+    return _add_entry(hass, LEGACY_BOX_GID, LEGACY_BOX_TITLE, **kwargs)
+
+
+async def _setup(hass, entry):
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def _unload(hass, entry):
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def _install_v120(hass, api):
+    """A loaded legacy entry with the registry records a v1.2.0 install has.
+
+    /v2/boxes is down for this first setup, so the repair can't run and the
+    platforms register their entities under the placeholder gid, as v1.2.0 did.
+    """
+    boxes = BoxesEndpoint(api, [BOX_RECORD], status=500)
+    entry = _legacy_entry(hass)
+    await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == LEGACY_BOX_GID  # nothing changed
+    return entry, boxes
+
+
+def _uid_to_entity_id(hass):
+    return {
+        e.unique_id: e.entity_id
+        for e in er.async_get(hass).entities.values()
+        if e.platform == DOMAIN
+    }
+
+
+def _snapshot(hass, *entries):
+    """Everything the repair could change, for before/after comparisons."""
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    return (
+        [(dict(e.data), e.unique_id, e.title) for e in entries],
+        sorted(
+            (e.entity_id, e.unique_id, e.device_id, e.name, e.config_entry_id)
+            for e in ent_reg.entities.values()
+        ),
+        sorted(
+            (
+                d.id,
+                tuple(sorted(d.identifiers)),
+                d.name,
+                d.name_by_user,
+                d.via_device_id,
+                tuple(sorted(d.config_entries)),
+            )
+            for d in dev_reg.devices.values()
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# New setup: discovery from /v2/boxes
+# ---------------------------------------------------------------------------
+
+
+async def _submit_credentials(hass):
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_MSP_URL: DOMAIN_NAME, CONF_ACCESS_TOKEN: TOKEN}
+    )
+
+
+async def test_new_setup_saves_real_box_metadata(hass, api):
+    BoxesEndpoint(api, [BOX_RECORD])
+    result = await _submit_credentials(hass)
+    await hass.async_block_till_done()
+
+    entry = result["result"]
+    assert entry.title == "Home"
+    assert entry.data[CONF_BOX_NAME] == "Home"
+    assert entry.data[CONF_BOX_MODEL] == "gold_pro"
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, BOX)})
+    assert device.name == "Home"
+    assert device.model == "Firewalla Gold Pro"
+    assert device.sw_version == "1.982"
+    # New installs name box entities after the real box.
+    assert _box_entity_id(hass, "online") == "binary_sensor.home_online"
+    await _unload(hass, entry)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [[], {"results": [BOX_RECORD]}, [None, "box", {"gid": ""}, {"name": "no gid"}]],
+    ids=["empty", "not-a-list", "no-usable-records"],
+)
+async def test_new_setup_without_usable_boxes(hass, api, no_setup, payload):
+    BoxesEndpoint(api, payload)
+    result = await _submit_credentials(hass)
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "no_boxes"}
+    assert not hass.config_entries.async_entries(DOMAIN)
+
+
+async def test_new_setup_skips_malformed_and_repeated_records(hass, api, no_setup):
+    BoxesEndpoint(
+        api,
+        [None, {"gid": ""}, {"name": "no gid"}, BOX_RECORD, {**BOX_RECORD, "name": "Dup"}],
+    )
+    result = await _submit_credentials(hass)
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_BOX_GID] == BOX
+    assert result["title"] == "Home"
+
+
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(500, "connection_failed"), (401, "auth_failed"), (403, "auth_failed")],
+)
+async def test_new_setup_boxes_api_failure(hass, api, no_setup, status, error):
+    BoxesEndpoint(api, [BOX_RECORD], status=status)
+    result = await _submit_credentials(hass)
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": error}
+    assert not hass.config_entries.async_entries(DOMAIN)
+
+
+async def test_new_setup_multiple_boxes_asks(hass, api, no_setup):
+    BoxesEndpoint(api, [BOX_RECORD, OTHER_RECORD])
+    result = await _submit_credentials(hass)
+    assert result["type"] == "form"
+    assert result["step_id"] == "box_selection"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BOX_GID: OTHER}
+    )
+    assert result["type"] == "create_entry"
+    assert result["title"] == "Cabin"
+    assert result["data"][CONF_BOX_GID] == OTHER
+    assert result["result"].unique_id == OTHER
+
+
+async def test_new_setup_same_box_twice_aborts(hass, api, no_setup):
+    BoxesEndpoint(api, [BOX_RECORD])
+    _add_entry(hass, BOX, "Home")
+    result = await _submit_credentials(hass)
+    assert result["type"] == "abort"
+    assert result["reason"] == "already_configured"
+
+
+async def test_new_setup_aborts_while_legacy_entry_for_account_exists(
+    hass, api, no_setup
+):
+    """The legacy entry may be this box; setup repairs it, so don't duplicate."""
+    BoxesEndpoint(api, [BOX_RECORD])
+    _legacy_entry(hass, msp=f"https://{DOMAIN_NAME}/")
+    result = await _submit_credentials(hass)
+    assert result["type"] == "abort"
+    assert result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_new_setup_ignores_legacy_entry_of_another_account(hass, api, no_setup):
+    BoxesEndpoint(api, [BOX_RECORD])
+    _legacy_entry(hass, msp="elsewhere.firewalla.net")
+    result = await _submit_credentials(hass)
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_BOX_GID] == BOX
+
+
+# ---------------------------------------------------------------------------
+# Upgrade: legacy entries are repaired in place
+# ---------------------------------------------------------------------------
+
+
+async def test_upgrade_repairs_in_place_and_keeps_customizations(hass, api):
+    entry, boxes = await _install_v120(hass, api)
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+
+    before = _uid_to_entity_id(hass)
+    legacy_uids = {"firewalla_default_refresh"} | {
+        f"firewalla_box_default_{k}" for k in LEGACY_BOX_KEYS
+    }
+    assert legacy_uids <= set(before)
+    online_id = before["firewalla_box_default_online"]
+    assert online_id == "binary_sensor.firewalla_box_default_online"
+    assert hass.states.get(online_id).state == "unavailable"  # the bug
+
+    # What a user may have done to the v1.2.0 records.
+    box_device = dev_reg.async_get_device(identifiers={(DOMAIN, LEGACY_BOX_GID)})
+    assert box_device.name == "Firewalla Box default"
+    dev_reg.async_update_device(box_device.id, name_by_user="Router")
+    ent_reg.async_update_entity(online_id, name="WAN up")
+    ent_reg.async_update_entity(
+        before["firewalla_box_default_public_ip"], new_entity_id="sensor.my_public_ip"
+    )
+    group_device = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "group_7")},
+        name="Kids",
+        via_device=(DOMAIN, LEGACY_BOX_GID),
+    )
+    assert group_device.via_device_id == box_device.id
+    before = _uid_to_entity_id(hass)  # with the user's entity_id change
+    entity_count = len(er.async_entries_for_config_entry(ent_reg, entry.entry_id))
+    await _unload(hass, entry)
+
+    boxes.status = 200
+    await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
+    assert entry.data[CONF_BOX_NAME] == "Home"
+    assert entry.unique_id == BOX
+    assert entry.title == "Home"
+
+    after = _uid_to_entity_id(hass)
+    # Same entity_ids (and so history), now under the real gid.
+    assert after["firewalla_box_" + BOX + "_online"] == online_id
+    assert after[f"firewalla_box_{BOX}_public_ip"] == "sensor.my_public_ip"
+    assert after[f"firewalla_{BOX}_refresh"] == before["firewalla_default_refresh"]
+    for key in LEGACY_BOX_KEYS:
+        assert after[f"firewalla_box_{BOX}_{key}"] == before[f"firewalla_box_default_{key}"]
+    assert not legacy_uids & set(after)
+    # Unrelated entities are untouched; only blocked_flows is new.
+    assert after["firewalla_rules_summary"] == before["firewalla_rules_summary"]
+    assert set(after) - {
+        f"firewalla_box_{BOX}_{k}" for k in LEGACY_BOX_KEYS
+    } - {f"firewalla_{BOX}_refresh"} == (set(before) - legacy_uids) | {
+        f"firewalla_box_{BOX}_blocked_flows"
+    }
+    assert (
+        len(er.async_entries_for_config_entry(ent_reg, entry.entry_id))
+        == entity_count + 1
+    )
+
+    # Same device record: id, user name and the group's link survive.
+    assert dev_reg.async_get_device(identifiers={(DOMAIN, LEGACY_BOX_GID)}) is None
+    repaired = dev_reg.async_get_device(identifiers={(DOMAIN, BOX)})
+    assert repaired.id == box_device.id
+    assert repaired.name_by_user == "Router"
+    assert repaired.name == "Home"
+    assert repaired.model == "Firewalla Gold Pro"
+    assert dev_reg.async_get(group_device.id).via_device_id == box_device.id
+    assert ent_reg.async_get(online_id).name == "WAN up"
+    assert ent_reg.async_get(online_id).device_id == box_device.id
+
+    # And the box statistics load.
+    assert hass.states.get(online_id).state == "on"
+    assert hass.states.get("sensor.my_public_ip").state == "203.0.113.7"
+
+    # Idempotent: further setups change nothing.
+    snapshot = _snapshot(hass, entry)
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert _snapshot(hass, entry) == snapshot
+    await _unload(hass, entry)
+
+
+def _collide_entry(hass):
+    _add_entry(hass, BOX, "Home")
+
+
+def _collide_entity(hass):
+    er.async_get(hass).async_get_or_create(
+        "binary_sensor", DOMAIN, f"firewalla_box_{BOX}_online"
+    )
+
+
+def _collide_device(hass):
+    other = MockConfigEntry(domain="other_integration")
+    other.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={(DOMAIN, BOX)}
+    )
+
+
+@pytest.mark.parametrize(
+    "collide",
+    [_collide_entry, _collide_entity, _collide_device],
+    ids=["entry", "entity", "device"],
+)
+async def test_upgrade_collision_changes_nothing(hass, api, caplog, collide):
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    collide(hass)
+    before = _snapshot(hass, entry)
+
+    boxes.status = 200
+    with caplog.at_level(logging.WARNING):
+        await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED  # rules still load
+    assert _snapshot(hass, entry) == before
+    assert "Not repairing this Firewalla entry's box identity" in caplog.text
+    online = _uid_to_entity_id(hass)["firewalla_box_default_online"]
+    assert hass.states.get(online).state == "unavailable"
+    await _unload(hass, entry)
+
+
+@pytest.mark.parametrize(
+    "payload", [[], [BOX_RECORD, OTHER_RECORD]], ids=["no-boxes", "two-boxes"]
+)
+async def test_upgrade_without_single_box_changes_nothing(hass, api, caplog, payload):
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    before = _snapshot(hass, entry)
+
+    boxes.payload, boxes.status = payload, 200
+    with caplog.at_level(logging.WARNING):
+        await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert _snapshot(hass, entry) == before
+    assert f"the account has {len(payload)} boxes" in caplog.text
+    await _unload(hass, entry)
+
+
+async def test_upgrade_interrupted_then_retried(hass, api):
+    """A repair stopped part-way retries setup and never duplicates entities."""
+    entry, boxes = await _install_v120(hass, api)
+    before = _uid_to_entity_id(hass)
+    await _unload(hass, entry)
+    boxes.status = 200
+
+    real_update = hass.config_entries.async_update_entry
+
+    def fail_on_repair(entry_, **kwargs):
+        if kwargs.get("unique_id") == BOX:
+            raise RuntimeError("interrupted")
+        return real_update(entry_, **kwargs)
+
+    with patch.object(hass.config_entries, "async_update_entry", fail_on_repair):
+        await _setup(hass, entry)
+    # Entities and device moved, entry not: setup must retry, not load.
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    assert entry.data[CONF_BOX_GID] == LEGACY_BOX_GID
+    assert "firewalla_box_default_online" not in _uid_to_entity_id(hass)
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
+    after = _uid_to_entity_id(hass)
+    assert after[f"firewalla_box_{BOX}_online"] == before["firewalla_box_default_online"]
+    assert not any("_default_" in uid for uid in after)
+    assert len(after) == len(set(after.values()))  # no duplicate records
+    assert hass.states.get(before["firewalla_box_default_online"]).state == "on"
+    await _unload(hass, entry)
+
+
+# ---------------------------------------------------------------------------
+# Reconfigure
+# ---------------------------------------------------------------------------
+
+
+async def _reconfigure(hass, entry):
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+    )
+    assert result["step_id"] == "reconfigure"
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_MSP_URL: DOMAIN_NAME, CONF_ACCESS_TOKEN: TOKEN}
+    )
+
+
+async def test_multibox_legacy_entry_box_chosen_in_reconfigure(hass, api):
+    """Option 1 (approved): a multi-box legacy entry waits for an explicit choice."""
+    entry, boxes = await _install_v120(hass, api)
+    before = _uid_to_entity_id(hass)
+    device_id = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, LEGACY_BOX_GID)}
+    ).id
+    boxes.payload, boxes.status = [BOX_RECORD, OTHER_RECORD], 200
+
+    result = await _reconfigure(hass, entry)
+    assert result["type"] == "form"
+    assert result["step_id"] == "reconfigure_box"
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BOX_GID: OTHER}
+    )
+    assert result["type"] == "abort"
+    assert result["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()  # the reload runs the repair
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == OTHER
+    assert entry.unique_id == OTHER
+    assert entry.title == "Cabin"
+    assert CONF_PENDING_BOX_GID not in entry.data
+    after = _uid_to_entity_id(hass)
+    for key in LEGACY_BOX_KEYS:
+        assert after[f"firewalla_box_{OTHER}_{key}"] == before[f"firewalla_box_default_{key}"]
+    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, OTHER)})
+    assert device.id == device_id
+    assert hass.states.get(before["firewalla_box_default_online"]).state == "on"
+    await _unload(hass, entry)
+
+
+async def test_multibox_reconfigure_refuses_box_with_own_entry(hass, api):
+    entry, boxes = await _install_v120(hass, api)
+    _add_entry(hass, BOX, "Home")
+    boxes.payload, boxes.status = [BOX_RECORD, OTHER_RECORD], 200
+
+    result = await _reconfigure(hass, entry)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BOX_GID: BOX}
+    )
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "box_already_configured"}
+    assert entry.data[CONF_BOX_GID] == LEGACY_BOX_GID
+    assert CONF_PENDING_BOX_GID not in entry.data
+    await _unload(hass, entry)
+
+
+async def test_reconfigure_keeps_real_box(hass, api):
+    BoxesEndpoint(api, [BOX_RECORD])
+    entry = _add_entry(hass, BOX, "Home", **{CONF_BOX_NAME: "Home"})
+    await _setup(hass, entry)
+
+    result = await _reconfigure(hass, entry)
+    assert result["type"] == "abort"
+    assert result["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+    assert entry.data[CONF_BOX_GID] == BOX
+    assert entry.data[CONF_BOX_NAME] == "Home"
+    await _unload(hass, entry)
+
+
+async def test_reconfigure_rejects_account_without_the_box(hass, api, no_setup):
+    BoxesEndpoint(api, [OTHER_RECORD])
+    entry = _add_entry(hass, BOX, "Home")
+
+    result = await _reconfigure(hass, entry)
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "box_not_found"}
+    assert entry.data[CONF_BOX_GID] == BOX

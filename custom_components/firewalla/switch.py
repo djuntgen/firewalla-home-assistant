@@ -18,12 +18,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DEVICE_MANUFACTURER,
-    DEVICE_MODEL_MAPPINGS,
     DOMAIN,
     RULE_ATTRIBUTES,
     RULE_TYPES,
 )
 from .coordinator import FirewallaDataUpdateCoordinator
+from .sensor import box_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -328,23 +328,7 @@ class FirewallaRuleSwitch(CoordinatorEntity, SwitchEntity):
 
     def _build_device_info(self) -> DeviceInfo:
         """Build device info for the Firewalla box."""
-        box_info: dict[str, Any] = {}
-        if self.coordinator.data and "box_info" in self.coordinator.data:
-            box_info = self.coordinator.data["box_info"]
-
-        box_gid = box_info.get("gid", self.coordinator.box_gid)
-        box_name = box_info.get("name", f"Firewalla Box {box_gid[:8]}")
-        box_model = box_info.get("model", "unknown")
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, box_gid)},
-            name=box_name,
-            manufacturer=DEVICE_MANUFACTURER,
-            model=DEVICE_MODEL_MAPPINGS.get(
-                box_model, f"Firewalla {box_model.title()}"
-            ),
-            sw_version=box_info.get("version"),
-        )
+        return box_device_info(self.coordinator)
 
     # ------------------------------------------------------------------
     # State properties

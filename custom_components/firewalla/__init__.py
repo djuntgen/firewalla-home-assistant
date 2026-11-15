@@ -18,6 +18,8 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_BASE_POLL_INTERVAL,
     CONF_BOX_GID,
+    CONF_BOX_MODEL,
+    CONF_BOX_NAME,
     CONF_DASHBOARD_USERS,
     CONF_DEVICES_INTERVAL,
     CONF_EXCLUDE_FILTERS,
@@ -30,9 +32,11 @@ from .const import (
     DEFAULT_FULL_RULES_INTERVAL,
     DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
+    LEGACY_BOX_GID,
     PLATFORMS,
 )
-from .coordinator import FirewallaDataUpdateCoordinator
+from .coordinator import FirewallaDataUpdateCoordinator, FirewallaMSPClient
+from .migration import async_repair_legacy_box_identity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -253,6 +257,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Get aiohttp session for API communication
         session = async_get_clientsession(hass)
 
+        if box_gid == LEGACY_BOX_GID:
+            try:
+                await async_repair_legacy_box_identity(
+                    hass,
+                    entry,
+                    FirewallaMSPClient(session, msp_domain, access_token),
+                )
+            except ConfigEntryNotReady:
+                raise  # interrupted part-way: retry setup, never load half-moved
+            except Exception:  # noqa: BLE001 — rules must still load
+                _LOGGER.exception("Unexpected error repairing the box identity (#24)")
+            box_gid = entry.data[CONF_BOX_GID]
+
         # Get rule filter options
         include_filters = entry.options.get(CONF_INCLUDE_FILTERS, [])
         exclude_filters = entry.options.get(CONF_EXCLUDE_FILTERS, [])
@@ -285,6 +302,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             full_rules_interval=full_rules_interval,
             devices_interval=devices_interval,
             users_cache_ttl=users_cache_ttl,
+            box_name=entry.data.get(CONF_BOX_NAME),
+            box_model=entry.data.get(CONF_BOX_MODEL),
         )
 
         # Test authentication and perform initial rule discovery

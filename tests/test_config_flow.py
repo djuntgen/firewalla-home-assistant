@@ -473,10 +473,16 @@ class TestConfigFlow:
         flow._msp_domain = "test.firewalla.net"
         flow._access_token = "test_token_123"
 
+        mock_msp_client.get_boxes = AsyncMock(
+            return_value=[{"gid": "box-123", "name": "Home", "model": "gold_pro"}]
+        )
+
         await flow._get_available_boxes()
 
-        # Should create default box entry
-        assert "default" in flow._available_boxes
+        # The real boxes from /v2/boxes, never a placeholder (#24)
+        assert flow._available_boxes == {
+            "box-123": {"gid": "box-123", "name": "Home", "model": "gold_pro"}
+        }
 
     @pytest.mark.asyncio
     async def test_test_rule_access_success(

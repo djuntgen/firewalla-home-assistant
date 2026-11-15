@@ -7,6 +7,8 @@ DOMAIN = "firewalla"
 CONF_MSP_URL = "msp_url"
 CONF_ACCESS_TOKEN = "access_token"
 CONF_BOX_GID = "box_gid"
+CONF_BOX_NAME = "box_name"
+CONF_BOX_MODEL = "box_model"
 CONF_RULE_FILTERS = "rule_filters"
 CONF_INCLUDE_FILTERS = "include_filters"
 CONF_EXCLUDE_FILTERS = "exclude_filters"
@@ -15,6 +17,14 @@ CONF_BASE_POLL_INTERVAL = "base_poll_interval"
 CONF_FULL_RULES_INTERVAL = "full_rules_interval"
 CONF_DEVICES_INTERVAL = "devices_interval"
 CONF_USERS_CACHE_TTL = "users_cache_ttl"
+
+# Placeholder box gid that setup saved before v1.2.1 (#24) instead of the real
+# gid from /v2/boxes. Entries holding it are repaired at setup.
+LEGACY_BOX_GID = "default"
+LEGACY_BOX_TITLE = "Firewalla Box"
+# The box chosen in Reconfigure for such an entry on a multi-box account; the
+# repair at the next setup applies it and then removes this key.
+CONF_PENDING_BOX_GID = "pending_box_gid"
 
 # Default MSP URL format (user should replace 'mydomain' with their actual domain)
 DEFAULT_MSP_URL_FORMAT = "mydomain.firewalla.net"
@@ -156,6 +166,7 @@ PLATFORMS = ["switch", "sensor", "binary_sensor", "button"]
 DEVICE_MANUFACTURER = "Firewalla"
 DEVICE_MODEL_MAPPINGS = {
     "gold": "Firewalla Gold",
+    "gold_pro": "Firewalla Gold Pro",
     "purple": "Firewalla Purple",
     "blue": "Firewalla Blue",
     "red": "Firewalla Red",

@@ -13,6 +13,16 @@
           "access_token": "Your personal access token from the Firewalla MSP account"
         }
       },
+      "reconfigure_box": {
+        "title": "Choose this entry's Firewalla box",
+        "description": "This entry was set up before v1.2.1 without saving which box it is for, and your MSP account has more than one box. Choose the box so its status entities can load. Existing entities and their history are kept.",
+        "data": {
+          "box_gid": "Firewalla Box"
+        },
+        "data_description": {
+          "box_gid": "The box this entry's rules and entities belong to"
+        }
+      },
       "box_selection": {
         "title": "Select Firewalla Box",
         "description": "Choose which Firewalla box to manage rules for. The integration will discover all existing rules and create switch entities for each one.",
@@ -29,6 +39,8 @@
       "auth_failed": "Invalid access token. Please check your token in MSP settings.",
       "connection_failed": "Cannot connect to MSP service. Please check your internet connection and MSP URL. Make sure the domain is correct.",
       "no_boxes": "No Firewalla boxes found in your MSP account. Please ensure your box is properly registered.",
+      "box_already_configured": "That box already has its own Firewalla entry. Choose another box.",
+      "box_not_found": "These credentials cannot reach the configured Firewalla box. Use credentials for the MSP account that holds it.",
       "rule_access_failed": "Cannot access rules. Please check your MSP permissions.",
       "timeout": "Connection timed out. Please try again.",
       "unknown_error": "An unexpected error occurred. Please check your configuration.",

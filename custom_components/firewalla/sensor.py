@@ -376,11 +376,7 @@ class FirewallaTimeLimitSensor(CoordinatorEntity, SensorEntity):
                 via_device=(DOMAIN, coordinator.box_gid),
             )
         else:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, coordinator.box_gid)},
-                name=f"Firewalla Box {coordinator.box_gid[:8]}",
-                manufacturer=DEVICE_MANUFACTURER,
-            )
+            self._attr_device_info = box_device_info(coordinator)
 
     def _get_user_data(self) -> dict[str, Any] | None:
         if not self.coordinator.data or "time_limits" not in self.coordinator.data:
