@@ -375,10 +375,19 @@ def _collide_device(hass):
     )
 
 
+def _share_legacy_device(hass):
+    """Another entry also owns the placeholder box device (found in review)."""
+    other = MockConfigEntry(domain="other_integration")
+    other.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=other.entry_id, identifiers={(DOMAIN, LEGACY_BOX_GID)}
+    )
+
+
 @pytest.mark.parametrize(
     "collide",
-    [_collide_entry, _collide_entity, _collide_device],
-    ids=["entry", "entity", "device"],
+    [_collide_entry, _collide_entity, _collide_device, _share_legacy_device],
+    ids=["entry", "entity", "device", "shared-legacy-device"],
 )
 async def test_upgrade_collision_changes_nothing(hass, api, caplog, collide):
     entry, boxes = await _install_v120(hass, api)
@@ -416,6 +425,26 @@ async def test_upgrade_without_single_box_changes_nothing(hass, api, caplog, pay
     await _unload(hass, entry)
 
 
+async def test_upgrade_never_adopts_a_foreign_device(hass, api):
+    """No placeholder device to move, but another owner's device has the real
+    gid: the entry must not attach itself to it (found in review)."""
+    entry = _legacy_entry(hass)
+    foreign = MockConfigEntry(domain="other_integration")
+    foreign.add_to_hass(hass)
+    dev_reg = dr.async_get(hass)
+    target = dev_reg.async_get_or_create(
+        config_entry_id=foreign.entry_id, identifiers={(DOMAIN, BOX)}, name="Foreign"
+    )
+    BoxesEndpoint(api, [BOX_RECORD])
+
+    await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == LEGACY_BOX_GID
+    assert dev_reg.async_get(target.id).config_entries == {foreign.entry_id}
+    await _unload(hass, entry)
+
+
 async def test_upgrade_interrupted_then_retried(hass, api):
     """A repair stopped part-way retries setup and never duplicates entities."""
     entry, boxes = await _install_v120(hass, api)
@@ -450,6 +479,135 @@ async def test_upgrade_interrupted_then_retried(hass, api):
     assert len(after) == len(set(after.values()))  # no duplicate records
     assert hass.states.get(before["firewalla_box_default_online"]).state == "on"
     await _unload(hass, entry)
+
+
+@pytest.mark.parametrize(
+    ("payload", "status"),
+    [
+        ([BOX_RECORD], 500),  # found in review: 8 registry entities became 15
+        ([], 200),
+        ([OTHER_RECORD], 200),  # the account's one box changed
+        ([BOX_RECORD, OTHER_RECORD], 200),  # no longer a one-box account
+    ],
+    ids=["boxes-api-down", "no-boxes", "changed-box", "two-boxes"],
+)
+async def test_upgrade_interrupted_retry_finishes_pinned_box(
+    hass, api, payload, status
+):
+    """Once a repair has moved records, a retry finishes that same box, whatever
+    /v2/boxes says now; it never loads the placeholder platforms, which would
+    duplicate the moved entities."""
+    entry, boxes = await _install_v120(hass, api)
+    before = _uid_to_entity_id(hass)
+    await _unload(hass, entry)
+    boxes.status = 200
+
+    real_update = hass.config_entries.async_update_entry
+
+    def fail_on_repair(entry_, **kwargs):
+        if kwargs.get("unique_id") == BOX:
+            raise RuntimeError("interrupted")
+        return real_update(entry_, **kwargs)
+
+    with patch.object(hass.config_entries, "async_update_entry", fail_on_repair):
+        await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    assert entry.data[CONF_PENDING_BOX_GID] == BOX  # pinned before any move
+
+    boxes.payload, boxes.status = payload, status
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
+    assert entry.unique_id == BOX
+    assert entry.data[CONF_BOX_NAME] == "Home"
+    assert CONF_PENDING_BOX_GID not in entry.data
+    after = _uid_to_entity_id(hass)
+    assert not any("_default_" in uid for uid in after)
+    assert not any(OTHER in uid for uid in after)
+    for key in LEGACY_BOX_KEYS:
+        assert (
+            after[f"firewalla_box_{BOX}_{key}"]
+            == before[f"firewalla_box_default_{key}"]
+        )
+    assert len(after) <= len(before) + 1  # at most + blocked_flows; no duplicates
+    assert len(set(after.values())) == len(after)
+    await _unload(hass, entry)
+
+
+@pytest.mark.parametrize(
+    ("payload", "status"),
+    [([BOX_RECORD], 500), ([BOX_RECORD, OTHER_RECORD], 200)],
+    ids=["boxes-api-down", "two-boxes"],
+)
+async def test_upgrade_interrupted_mid_entity_moves(hass, api, payload, status):
+    """Interrupted at the third entity move (found in QA): the retry finishes
+    the rest on the pinned box and nothing is duplicated."""
+    entry, boxes = await _install_v120(hass, api)
+    before = _uid_to_entity_id(hass)
+    await _unload(hass, entry)
+    boxes.status = 200
+
+    ent_reg = er.async_get(hass)
+    real_update_entity = ent_reg.async_update_entity
+    moves = 0
+
+    def fail_third_move(entity_id, **kwargs):
+        nonlocal moves
+        if "new_unique_id" in kwargs:
+            moves += 1
+            if moves == 3:
+                raise RuntimeError("interrupted")
+        return real_update_entity(entity_id, **kwargs)
+
+    with patch.object(ent_reg, "async_update_entity", fail_third_move):
+        await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    assert moves == 3
+
+    boxes.payload, boxes.status = payload, status
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
+    after = _uid_to_entity_id(hass)
+    assert not any("_default_" in uid for uid in after)
+    for key in LEGACY_BOX_KEYS:
+        assert (
+            after[f"firewalla_box_{BOX}_{key}"]
+            == before[f"firewalla_box_default_{key}"]
+        )
+    assert len(set(after.values())) == len(after) <= len(before) + 1
+    await _unload(hass, entry)
+
+
+async def test_upgrade_interrupted_retry_waits_on_collision(hass, api):
+    """A collision that appears after records moved: retry, never load."""
+    entry, boxes = await _install_v120(hass, api)
+    count = len(_uid_to_entity_id(hass))
+    await _unload(hass, entry)
+    boxes.status = 200
+
+    real_update = hass.config_entries.async_update_entry
+
+    def fail_on_repair(entry_, **kwargs):
+        if kwargs.get("unique_id") == BOX:
+            raise RuntimeError("interrupted")
+        return real_update(entry_, **kwargs)
+
+    with patch.object(hass.config_entries, "async_update_entry", fail_on_repair):
+        await _setup(hass, entry)
+    _collide_entry(hass)
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    assert entry.data[CONF_BOX_GID] == LEGACY_BOX_GID
+    assert len(_uid_to_entity_id(hass)) == count
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
 
 
 # ---------------------------------------------------------------------------
@@ -545,3 +703,31 @@ async def test_reconfigure_rejects_account_without_the_box(hass, api, no_setup):
     assert result["type"] == "form"
     assert result["errors"] == {"base": "box_not_found"}
     assert entry.data[CONF_BOX_GID] == BOX
+
+
+async def test_reconfigure_keeps_pinned_box_of_unfinished_repair(hass, api):
+    """Reconfigure can't switch boxes under a half-done repair; setup finishes it."""
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    boxes.status = 200
+    real_update = hass.config_entries.async_update_entry
+
+    def fail_on_repair(entry_, **kwargs):
+        if kwargs.get("unique_id") == BOX:
+            raise RuntimeError("interrupted")
+        return real_update(entry_, **kwargs)
+
+    with patch.object(hass.config_entries, "async_update_entry", fail_on_repair):
+        await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+
+    boxes.payload = [BOX_RECORD, OTHER_RECORD]
+    result = await _reconfigure(hass, entry)
+    assert result["type"] == "abort"  # no box choice offered
+    assert result["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
+    assert not any(OTHER in uid for uid in _uid_to_entity_id(hass))
+    await _unload(hass, entry)

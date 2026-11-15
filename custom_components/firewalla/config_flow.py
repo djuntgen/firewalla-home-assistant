@@ -18,8 +18,11 @@ from typing import Any, Dict, Optional
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
@@ -45,6 +48,7 @@ from .const import (
     LEGACY_BOX_GID,
 )
 from .coordinator import FirewallaMSPClient, box_display_name, boxes_by_gid
+from .migration import partially_repaired
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +66,14 @@ def _normalize_msp_domain(msp_domain: Any) -> str:
 
 def _same_msp_domain(first: Any, second: Any) -> bool:
     return _normalize_msp_domain(first) == _normalize_msp_domain(second)
+
+
+def _repair_in_progress(hass: HomeAssistant, entry: config_entries.ConfigEntry) -> bool:
+    """Whether an interrupted repair has already moved records to its pinned box.
+
+    Its box can't be changed then: the next setup finishes the pinned one.
+    """
+    return partially_repaired(er.async_get(hass), dr.async_get(hass), entry)
 
 
 async def _async_fetch_boxes(client: FirewallaMSPClient) -> Dict[str, Any]:
@@ -422,7 +434,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         # Set up before v1.2.1 without its box (#24). One box
                         # is repaired at setup; with several, the user chooses.
                         boxes = await _async_fetch_boxes(client)
-                        if len(boxes) > 1:
+                        if len(boxes) > 1 and not _repair_in_progress(self.hass, entry):
                             self._available_boxes = boxes
                             self._reconfigure_credentials = credentials
                             return await self.async_step_reconfigure_box()

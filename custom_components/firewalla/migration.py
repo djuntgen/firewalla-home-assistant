@@ -51,6 +51,40 @@ def _repaired_unique_id(unique_id: str, box_gid: str) -> str | None:
     return None
 
 
+def partially_repaired(
+    ent_reg: er.EntityRegistry, dev_reg: dr.DeviceRegistry, entry: ConfigEntry
+) -> bool:
+    """Whether an interrupted repair left this entry's records on a real gid.
+
+    A placeholder entry never creates them otherwise: its box entities and box
+    device all carry the placeholder gid.
+    """
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if entity.platform != DOMAIN:
+            continue
+        if entity.unique_id.startswith(
+            "firewalla_box_"
+        ) and not entity.unique_id.startswith(_LEGACY_BOX_UID_PREFIX):
+            return True
+        # The refresh button is the integration's only button.
+        if (
+            entity.domain == "button"
+            and entity.unique_id.endswith("_refresh")
+            and entity.unique_id != _LEGACY_REFRESH_UID
+        ):
+            return True
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        for domain, identifier in device.identifiers:
+            # Group devices are "group_<id>"; anything else is the box device.
+            if (
+                domain == DOMAIN
+                and identifier != LEGACY_BOX_GID
+                and not identifier.startswith("group_")
+            ):
+                return True
+    return False
+
+
 async def async_repair_legacy_box_identity(
     hass: HomeAssistant, entry: ConfigEntry, client: FirewallaMSPClient
 ) -> None:
@@ -62,51 +96,67 @@ async def async_repair_legacy_box_identity(
     rather than recreated, so entity_ids, device ids, user customizations and
     child-device links survive.
 
-    Anything else changes nothing: the entry keeps running on the placeholder
-    (rules, groups and devices work; the box status entities stay
-    unavailable), and the repair is tried again at the next setup. Updates go
-    entities, then device, then entry, so a retry after an interruption finds
-    nothing left to move but the remainder.
+    Until the first registry record moves, anything unexpected changes
+    nothing: the entry keeps running on the placeholder (rules, groups and
+    devices work; the box status entities stay unavailable), and the repair is
+    tried again at the next setup. The target box is saved in the entry before
+    the first move, so an interrupted repair is finished on that same box at
+    the next setup, without needing /v2/boxes. Until it can be finished, setup
+    is retried: the platforms never load on a half-moved entry.
     """
     if entry.data.get(CONF_BOX_GID) != LEGACY_BOX_GID:
         return
 
-    try:
-        boxes = boxes_by_gid(await client.get_boxes())
-    except Exception as err:  # noqa: BLE001 — never block setup over this
-        _LOGGER.warning(
-            "Could not list Firewalla boxes to repair this entry's box identity "
-            "(#24); box status stays unavailable until it is retried at the next "
-            "start: %s",
-            err,
-        )
-        return
-    chosen = entry.data.get(CONF_PENDING_BOX_GID)
-    if chosen:
-        if chosen not in boxes:
-            _LOGGER.warning(
-                "The Firewalla box chosen in Reconfigure is not in this account's "
-                "/v2/boxes; nothing was changed. Choose it again in Reconfigure"
-            )
-            return
-        box_gid = chosen
-    elif len(boxes) == 1:
-        box_gid = next(iter(boxes))
-    else:
-        _LOGGER.warning(
-            "This Firewalla entry was set up before v1.2.1 without its box's id "
-            "(#24), and the account has %d boxes. Rules, groups and devices keep "
-            "working; to load the box status entities, choose the box in "
-            "Settings > Devices & services > Firewalla > Reconfigure",
-            len(boxes),
-        )
-        return
-    record = boxes[box_gid]
-
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
-    collisions: list[str] = []
+    pinned = entry.data.get(CONF_PENDING_BOX_GID)
+    resuming = partially_repaired(ent_reg, dev_reg, entry)
 
+    if resuming:
+        if not pinned:
+            raise ConfigEntryNotReady(
+                "Records of an interrupted box identity repair (#24) exist but "
+                "its target box was not saved"
+            )
+        box_gid = pinned
+        record = {
+            "name": entry.data.get(CONF_BOX_NAME),
+            "model": entry.data.get(CONF_BOX_MODEL),
+        }
+    else:
+        try:
+            boxes = boxes_by_gid(await client.get_boxes())
+        except Exception as err:  # noqa: BLE001 — never block setup over this
+            _LOGGER.warning(
+                "Could not list Firewalla boxes to repair this entry's box "
+                "identity (#24); box status stays unavailable until it is retried "
+                "at the next start: %s",
+                err,
+            )
+            return
+        if pinned:
+            if pinned not in boxes:
+                _LOGGER.warning(
+                    "The Firewalla box chosen in Reconfigure is not in this "
+                    "account's /v2/boxes; nothing was changed. Choose it again in "
+                    "Reconfigure"
+                )
+                return
+            box_gid = pinned
+        elif len(boxes) == 1:
+            box_gid = next(iter(boxes))
+        else:
+            _LOGGER.warning(
+                "This Firewalla entry was set up before v1.2.1 without its box's "
+                "id (#24), and the account has %d boxes. Rules, groups and devices "
+                "keep working; to load the box status entities, choose the box in "
+                "Settings > Devices & services > Firewalla > Reconfigure",
+                len(boxes),
+            )
+            return
+        record = boxes[box_gid]
+
+    collisions: list[str] = []
     for other in hass.config_entries.async_entries(DOMAIN):
         if other.entry_id != entry.entry_id and other.unique_id == box_gid:
             collisions.append(f"config entry {other.entry_id} already has the box")
@@ -123,34 +173,46 @@ async def async_repair_legacy_box_identity(
             collisions.append(f"{existing} already has unique_id {new_unique_id}")
         entity_moves[entity.entity_id] = new_unique_id
 
+    # Only a device this entry alone owns may be moved, or (after an
+    # interrupted repair) already sit on the real gid.
+    only_this_entry = {entry.entry_id}
     legacy_device = dev_reg.async_get_device(identifiers={(DOMAIN, LEGACY_BOX_GID)})
     real_device = dev_reg.async_get_device(identifiers={(DOMAIN, box_gid)})
-    if legacy_device is not None:
-        if entry.entry_id not in legacy_device.config_entries:
-            collisions.append(f"device {legacy_device.id} belongs to another entry")
-        if real_device is not None and real_device.id != legacy_device.id:
-            collisions.append(f"device {real_device.id} already has the box")
+    if legacy_device is not None and legacy_device.config_entries != only_this_entry:
+        collisions.append(f"device {legacy_device.id} is shared with another entry")
+    if real_device is not None and (
+        legacy_device is not None or real_device.config_entries != only_this_entry
+    ):
+        collisions.append(f"device {real_device.id} already has the box")
 
     if collisions:
+        message = (
+            "Not repairing this Firewalla entry's box identity (#24): "
+            + "; ".join(collisions)
+        )
+        if resuming:
+            # Records already moved: loading on the placeholder would duplicate.
+            raise ConfigEntryNotReady(message)
         _LOGGER.warning(
-            "Not repairing this Firewalla entry's box identity (#24), nothing was "
-            "changed: %s. Box status stays unavailable",
-            "; ".join(collisions),
+            "%s. Nothing was changed; box status stays unavailable", message
         )
         return
 
     box_name = box_display_name(record)
-    data: dict[str, Any] = {
-        **entry.data,
-        CONF_BOX_GID: box_gid,
-        CONF_BOX_NAME: box_name,
-    }
-    data.pop(CONF_PENDING_BOX_GID, None)
     box_model = record.get("model")
+    metadata: dict[str, Any] = {CONF_BOX_NAME: box_name}
     if isinstance(box_model, str) and box_model:
-        data[CONF_BOX_MODEL] = box_model
+        metadata[CONF_BOX_MODEL] = box_model
+    data: dict[str, Any] = {**entry.data, **metadata, CONF_BOX_GID: box_gid}
+    data.pop(CONF_PENDING_BOX_GID, None)
 
     try:
+        if not resuming:
+            # Pin the target before the first move, so a retry finishes it.
+            hass.config_entries.async_update_entry(
+                entry,
+                data={**entry.data, **metadata, CONF_PENDING_BOX_GID: box_gid},
+            )
         for entity_id, new_unique_id in entity_moves.items():
             ent_reg.async_update_entity(entity_id, new_unique_id=new_unique_id)
         if legacy_device is not None:
@@ -169,7 +231,7 @@ async def async_repair_legacy_box_identity(
     except Exception as err:
         # Part of the repair may be done. Setting up the platforms now would
         # recreate the moved entities under the placeholder gid, so retry the
-        # whole setup instead: the retry moves only what is left.
+        # whole setup instead: the retry finishes the pinned target.
         raise ConfigEntryNotReady(
             f"Interrupted while repairing the box identity (#24): {err}"
         ) from err
