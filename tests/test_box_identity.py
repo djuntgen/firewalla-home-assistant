@@ -1,18 +1,15 @@
-"""Real box identity (#24): setup must save the gid that box statistics look up.
+"""Real box identity (#24): discovery in the config flow, the in-place repair of
+entries saved with the placeholder gid, and Reconfigure.
 
-The MSP API is mocked only at the HTTP layer (aioresponses), so the config flow,
-the client, the coordinator and the platforms all run for real. The v1.2.0 tests
-missed #24 because setup and statistics were each tested with invented gids
-that happened to agree.
+The MSP API is mocked only at the HTTP layer; config flow, client, coordinator,
+platforms and the HA registries all run for real.
 """
 
 import logging
-import re
 from unittest.mock import patch
 
-import aiohttp
 import pytest
-from aioresponses import CallbackResult, aioresponses
+from aioresponses import CallbackResult
 from homeassistant import config_entries
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -29,27 +26,20 @@ from custom_components.firewalla.const import (
     LEGACY_BOX_GID,
     LEGACY_BOX_TITLE,
 )
+from tests.test_issue_24_regression import (  # noqa: F401 — fixtures
+    BASE,
+    BOX,
+    BOX_RECORD,
+    DOMAIN_NAME,
+    TOKEN,
+    _box_entity_id,
+    api,
+    auto_enable_custom_integrations,
+    session,
+)
 
-DOMAIN_NAME = "testbox.firewalla.net"
-BASE = f"https://{DOMAIN_NAME}/v2"
-RULES_URL = re.compile(r"^https://testbox\.firewalla\.net/v2/rules(\?.*)?$")
-TOKEN = "test-token-0123456789"
-
-BOX = "3a7c9f1e-real-box-gid"
-BOX_RECORD = {
-    "gid": BOX,
-    "name": "Home",
-    "model": "gold_pro",
-    "online": True,
-    "version": "1.982",
-    "publicIP": "203.0.113.7",
-    "deviceCount": 181,
-    "ruleCount": 103,
-    "alarmCount": 470,
-}
 OTHER = "9d41b2c0-other-box-gid"
 OTHER_RECORD = {**BOX_RECORD, "gid": OTHER, "name": "Cabin", "model": "purple"}
-TRENDS = [{"ts": 1793595600, "value": 345}]
 # Unique_id suffixes of the box entities a v1.2.0 install has (blocked_flows is
 # only created once the box count is known to be 1, so a legacy entry never had it).
 LEGACY_BOX_KEYS = (
@@ -60,88 +50,6 @@ LEGACY_BOX_KEYS = (
     "online_devices",
     "alarms",
 )
-
-
-@pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Load custom_components/firewalla as a real integration."""
-    yield
-
-
-@pytest.fixture
-async def session():
-    # ThreadedResolver: the default aiodns resolver leaves a pycares thread
-    # behind, which the HA test harness rejects. aioresponses answers every
-    # request, so nothing is resolved or connected either way.
-    connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
-    async with aiohttp.ClientSession(connector=connector) as s:
-        yield s
-
-
-@pytest.fixture
-def api(session):
-    """MSP API at the HTTP boundary; every module shares the one session."""
-    with (
-        aioresponses() as m,
-        patch(
-            "custom_components.firewalla.config_flow.async_get_clientsession",
-            return_value=session,
-        ),
-        patch(
-            "custom_components.firewalla.async_get_clientsession",
-            return_value=session,
-        ),
-    ):
-        m.get(RULES_URL, payload={"results": [], "count": 0}, repeat=True)
-        m.get(f"{BASE}/devices", payload=[], repeat=True)
-        m.get(f"{BASE}/users", payload=[], repeat=True)
-        m.get(f"{BASE}/trends/flows", payload=TRENDS, repeat=True)
-        yield m
-
-
-def _box_entity_id(hass, key):
-    """entity_id of this integration's box entity whose unique_id ends in key."""
-    ent_reg = er.async_get(hass)
-    matches = [
-        e.entity_id
-        for e in ent_reg.entities.values()
-        if e.platform == DOMAIN
-        and e.unique_id.startswith("firewalla_box_")
-        and e.unique_id.endswith(f"_{key}")
-    ]
-    assert len(matches) == 1, matches
-    return matches[0]
-
-
-async def test_setup_then_box_statistics_join(hass, api):
-    """#24: the gid the config flow saves is the gid statistics find in /v2/boxes."""
-    api.get(f"{BASE}/boxes", payload=[BOX_RECORD], repeat=True)
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_MSP_URL: DOMAIN_NAME, CONF_ACCESS_TOKEN: TOKEN}
-    )
-    assert result["type"] == "create_entry", result
-    await hass.async_block_till_done()
-
-    entry = result["result"]
-    assert entry.state is config_entries.ConfigEntryState.LOADED
-
-    # The reported symptom: box entities stay unavailable on every start.
-    online = hass.states.get(_box_entity_id(hass, "online"))
-    assert online is not None
-    assert online.state == "on"
-    assert hass.states.get(_box_entity_id(hass, "public_ip")).state == "203.0.113.7"
-    assert hass.states.get(_box_entity_id(hass, "alarms")).state == "470"
-
-    # And the cause: setup saved the real gid, not a placeholder.
-    assert entry.data[CONF_BOX_GID] == BOX
-    assert entry.unique_id == BOX
-
-    await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +198,13 @@ async def test_new_setup_without_usable_boxes(hass, api, no_setup, payload):
 async def test_new_setup_skips_malformed_and_repeated_records(hass, api, no_setup):
     BoxesEndpoint(
         api,
-        [None, {"gid": ""}, {"name": "no gid"}, BOX_RECORD, {**BOX_RECORD, "name": "Dup"}],
+        [
+            None,
+            {"gid": ""},
+            {"name": "no gid"},
+            BOX_RECORD,
+            {**BOX_RECORD, "name": "Dup"},
+        ],
     )
     result = await _submit_credentials(hass)
     assert result["type"] == "create_entry"
@@ -405,15 +319,16 @@ async def test_upgrade_repairs_in_place_and_keeps_customizations(hass, api):
     assert after[f"firewalla_box_{BOX}_public_ip"] == "sensor.my_public_ip"
     assert after[f"firewalla_{BOX}_refresh"] == before["firewalla_default_refresh"]
     for key in LEGACY_BOX_KEYS:
-        assert after[f"firewalla_box_{BOX}_{key}"] == before[f"firewalla_box_default_{key}"]
+        assert (
+            after[f"firewalla_box_{BOX}_{key}"]
+            == before[f"firewalla_box_default_{key}"]
+        )
     assert not legacy_uids & set(after)
     # Unrelated entities are untouched; only blocked_flows is new.
     assert after["firewalla_rules_summary"] == before["firewalla_rules_summary"]
-    assert set(after) - {
-        f"firewalla_box_{BOX}_{k}" for k in LEGACY_BOX_KEYS
-    } - {f"firewalla_{BOX}_refresh"} == (set(before) - legacy_uids) | {
-        f"firewalla_box_{BOX}_blocked_flows"
-    }
+    assert set(after) - {f"firewalla_box_{BOX}_{k}" for k in LEGACY_BOX_KEYS} - {
+        f"firewalla_{BOX}_refresh"
+    } == (set(before) - legacy_uids) | {f"firewalla_box_{BOX}_blocked_flows"}
     assert (
         len(er.async_entries_for_config_entry(ent_reg, entry.entry_id))
         == entity_count + 1
@@ -528,7 +443,9 @@ async def test_upgrade_interrupted_then_retried(hass, api):
     assert entry.state is config_entries.ConfigEntryState.LOADED
     assert entry.data[CONF_BOX_GID] == BOX
     after = _uid_to_entity_id(hass)
-    assert after[f"firewalla_box_{BOX}_online"] == before["firewalla_box_default_online"]
+    assert (
+        after[f"firewalla_box_{BOX}_online"] == before["firewalla_box_default_online"]
+    )
     assert not any("_default_" in uid for uid in after)
     assert len(after) == len(set(after.values()))  # no duplicate records
     assert hass.states.get(before["firewalla_box_default_online"]).state == "on"
@@ -543,7 +460,10 @@ async def test_upgrade_interrupted_then_retried(hass, api):
 async def _reconfigure(hass, entry):
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
-        context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
     )
     assert result["step_id"] == "reconfigure"
     return await hass.config_entries.flow.async_configure(
@@ -555,9 +475,9 @@ async def test_multibox_legacy_entry_box_chosen_in_reconfigure(hass, api):
     """Option 1 (approved): a multi-box legacy entry waits for an explicit choice."""
     entry, boxes = await _install_v120(hass, api)
     before = _uid_to_entity_id(hass)
-    device_id = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, LEGACY_BOX_GID)}
-    ).id
+    device_id = (
+        dr.async_get(hass).async_get_device(identifiers={(DOMAIN, LEGACY_BOX_GID)}).id
+    )
     boxes.payload, boxes.status = [BOX_RECORD, OTHER_RECORD], 200
 
     result = await _reconfigure(hass, entry)
@@ -577,7 +497,10 @@ async def test_multibox_legacy_entry_box_chosen_in_reconfigure(hass, api):
     assert CONF_PENDING_BOX_GID not in entry.data
     after = _uid_to_entity_id(hass)
     for key in LEGACY_BOX_KEYS:
-        assert after[f"firewalla_box_{OTHER}_{key}"] == before[f"firewalla_box_default_{key}"]
+        assert (
+            after[f"firewalla_box_{OTHER}_{key}"]
+            == before[f"firewalla_box_default_{key}"]
+        )
     device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, OTHER)})
     assert device.id == device_id
     assert hass.states.get(before["firewalla_box_default_online"]).state == "on"
