@@ -64,7 +64,7 @@
       "already_configured": "This Firewalla box is already configured. Each box can only be configured once.",
       "box_identity_changed": "This entry's box was being set while this form was open. Open Reconfigure again.",
       "legacy_entry_needs_box": "This account already has a Firewalla entry set up before v1.2.1 that isn't matched to its box yet. Open that entry's Reconfigure and choose its box first, then add this box.",
-      "repair_target_missing": "This entry's upgrade to v1.2.1 was interrupted before it saved which box the entry belongs to, so it can't be finished safely and the integration won't load. Restore a Home Assistant backup from before the upgrade, or delete this Firewalla entry and add it again (its entities are created again; their customizations and history are not kept).",
+      "repair_target_missing": "This entry's upgrade to v1.2.1 was interrupted before it saved which box the entry belongs to, so the integration can't safely choose a box and won't load. Restore a Home Assistant backup from before the upgrade, or open an issue at https://github.com/djuntgen/firewalla-home-assistant/issues for a guided repair. Don't delete and re-add the integration: its entities would be created again without their customizations and history.",
       "invalid_host": "The provided MSP URL is not valid. Please check the URL format.",
       "auth_failed": "Authentication with the Firewalla MSP API failed. Please check your credentials."
     }
