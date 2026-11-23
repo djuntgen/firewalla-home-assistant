@@ -115,7 +115,11 @@ def partially_repaired(
         gid = _box_entity_gid(entity, root_device_id)
         if gid is not None and gid != LEGACY_BOX_GID:
             return True
-        if pinned and entity.unique_id == f"firewalla_{pinned}_refresh":
+        if (
+            pinned
+            and entity.domain == "button"
+            and entity.unique_id == f"firewalla_{pinned}_refresh"
+        ):
             return True
     for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
         gids = {ident for domain, ident in device.identifiers if domain == DOMAIN}

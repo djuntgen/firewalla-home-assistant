@@ -969,3 +969,54 @@ async def test_interrupted_repair_without_saved_target(hass, api, interrupt, v11
     assert result["reason"] == "repair_target_missing"
     assert _snapshot(hass, entry) == before
     await _unload(hass, entry)
+
+
+async def test_pinned_refresh_uid_on_another_domain_is_not_evidence(hass, api):
+    """Only the refresh *button* on the pinned gid shows a repair started; a
+    sensor with that unique_id must not make setup skip /v2/boxes and finish
+    a repair that never started (lead review of b4d2556)."""
+    entry, boxes = await _install_v120(hass, api)  # /v2/boxes stays down
+    await _unload(hass, entry)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_PENDING_BOX_GID: BOX}  # chosen, not moved
+    )
+    er.async_get(hass).async_get_or_create(
+        "sensor", DOMAIN, f"firewalla_{BOX}_refresh", config_entry=entry
+    )
+    before = _snapshot(hass, entry)
+
+    await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == LEGACY_BOX_GID
+    assert _snapshot(hass, entry) == before
+    await _unload(hass, entry)
+
+
+async def test_pinned_refresh_button_alone_resumes_without_box_device(hass, api):
+    """v1.1.0 entry without its rules summary sensor (so the box device can't be
+    found), interrupted after only the refresh button moved: the pinned button
+    still marks the repair as started, so a retry with /v2/boxes down finishes
+    it instead of creating a second refresh button."""
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    _make_v110_registry(hass)
+    ent_reg = er.async_get(hass)
+    ent_reg.async_remove(_uid_to_entity_id(hass)["firewalla_rules_summary"])
+    refresh = _uid_to_entity_id(hass)["firewalla_default_refresh"]
+    boxes.status = 200
+    with _fail_on_device_move(hass):
+        await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    assert entry.data[CONF_PENDING_BOX_GID] == BOX
+
+    boxes.status = 500
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
+    uids = _uid_to_entity_id(hass)
+    assert uids[f"firewalla_{BOX}_refresh"] == refresh
+    assert "firewalla_default_refresh" not in uids
+    await _unload(hass, entry)
