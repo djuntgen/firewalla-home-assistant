@@ -45,6 +45,7 @@ from .const import (
     DEFAULT_MSP_URL_FORMAT,
     DEFAULT_USERS_CACHE_TTL,
     DOMAIN,
+    ISSUES_URL,
     LEGACY_BOX_GID,
 )
 from .coordinator import FirewallaMSPClient, box_display_name, boxes_by_gid
@@ -419,7 +420,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Records moved but the target box wasn't saved (#24): setup can't
             # finish it safely and keeps retrying. Say so before asking for
             # credentials that can't help.
-            return self.async_abort(reason="repair_target_missing")
+            return self.async_abort(
+                reason="repair_target_missing",
+                description_placeholders={"issues_url": ISSUES_URL},
+            )
 
         if user_input is not None:
             msp_domain = user_input[CONF_MSP_URL].strip()

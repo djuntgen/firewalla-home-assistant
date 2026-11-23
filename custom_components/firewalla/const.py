@@ -22,6 +22,8 @@ CONF_USERS_CACHE_TTL = "users_cache_ttl"
 # gid from /v2/boxes. Entries holding it are repaired at setup.
 LEGACY_BOX_GID = "default"
 LEGACY_BOX_TITLE = "Firewalla Box"
+# Same as manifest.json issue_tracker; passed to strings as a placeholder.
+ISSUES_URL = "https://github.com/djuntgen/firewalla-home-assistant/issues"
 # The box chosen in Reconfigure for such an entry on a multi-box account; the
 # repair at the next setup applies it and then removes this key.
 CONF_PENDING_BOX_GID = "pending_box_gid"

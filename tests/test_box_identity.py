@@ -967,6 +967,8 @@ async def test_interrupted_repair_without_saved_target(hass, api, interrupt, v11
     )
     assert result["type"] == "abort"
     assert result["reason"] == "repair_target_missing"
+    # Strings carry no URLs (hassfest); the issues link is a placeholder.
+    assert result["description_placeholders"]["issues_url"].endswith("/issues")
     assert _snapshot(hass, entry) == before
     await _unload(hass, entry)
 
