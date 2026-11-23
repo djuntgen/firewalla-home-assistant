@@ -335,7 +335,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if entry.data.get(CONF_BOX_GID) == LEGACY_BOX_GID and _same_msp_domain(
                 entry.data.get(CONF_MSP_URL), self._msp_domain
             ):
-                return self.async_abort(reason="already_configured")
+                return self.async_abort(reason="legacy_entry_needs_box")
 
         _LOGGER.info("Successfully configured Firewalla integration for %s", box_name)
         data = {
@@ -410,6 +410,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle reconfiguration to update MSP credentials."""
         errors: Dict[str, str] = {}
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
+        if (
+            entry.data.get(CONF_BOX_GID) == LEGACY_BOX_GID
+            and not entry.data.get(CONF_PENDING_BOX_GID)
+            and _repair_in_progress(self.hass, entry)
+        ):
+            # Records moved but the target box wasn't saved (#24): setup can't
+            # finish it safely and keeps retrying. Say so before asking for
+            # credentials that can't help.
+            return self.async_abort(reason="repair_target_missing")
 
         if user_input is not None:
             msp_domain = user_input[CONF_MSP_URL].strip()

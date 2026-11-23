@@ -8,7 +8,8 @@
   - **Existing installs are repaired on upgrade**, with nothing to do on accounts with one box. Your entities keep their entity IDs, history, custom names and areas; the box device keeps its place and any name you gave it, and is otherwise renamed from "Firewalla Box default" to your box's name. The blocked-flows sensor, which v1.2.0 couldn't create, now appears.
   - **Accounts with more than one box** can't tell which box an existing entry is for. Rules, groups and devices keep working; to load the box entities, open **Settings > Devices & services > Firewalla > Reconfigure**, re-enter your token and choose the box.
   - New installs name the box device and its entities after your box (for example `binary_sensor.home_online` for a box named "Home").
-  - Reconfigure now refuses credentials for an MSP account that doesn't have the configured box.
+  - Reconfigure now checks the new credentials against your boxes, so it refuses an MSP account that doesn't have the configured box, and a credential update fails while the Firewalla box list can't be read. Try again once it is back.
+  - Adding a box while an entry from before v1.2.1 is still waiting for its box choice is refused with a message saying to choose that entry's box in Reconfigure first.
 
 ## v1.2.0 (2026-11-08)
 

@@ -254,7 +254,9 @@ async def test_new_setup_aborts_while_legacy_entry_for_account_exists(
     _legacy_entry(hass, msp=f"https://{DOMAIN_NAME}/")
     result = await _submit_credentials(hass)
     assert result["type"] == "abort"
-    assert result["reason"] == "already_configured"
+    # Its own reason, not already_configured: on a multi-box account the user
+    # is adding another box and must choose the legacy entry's box first.
+    assert result["reason"] == "legacy_entry_needs_box"
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
@@ -796,3 +798,174 @@ async def test_reconfigure_box_choice_rechecks_repair_on_submit(hass, api):
     assert result["reason"] == "box_identity_changed"
     assert entry.data[CONF_PENDING_BOX_GID] == BOX
     assert entry.data[CONF_ACCESS_TOKEN] == TOKEN
+
+
+# ---------------------------------------------------------------------------
+# Second review (pre-PR): positive detection of an interrupted repair, a
+# missing target, and the abort while a legacy entry exists
+# ---------------------------------------------------------------------------
+
+
+def _add_unrelated_records(hass, entry):
+    """Records a later release might add to an entry: not box evidence."""
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, "wan_1")}, name="WAN 1"
+    )
+    ent_reg.async_get_or_create(
+        "button", DOMAIN, "firewalla_wan_1_refresh", config_entry=entry
+    )
+    ent_reg.async_get_or_create(
+        "sensor", DOMAIN, "firewalla_box_wan_1_latency", config_entry=entry
+    )
+
+
+async def test_upgrade_ignores_unrelated_records_one_box(hass, api):
+    """An extra device or *_refresh button must not look like a half-done
+    repair: that would keep every legacy entry from loading (second review)."""
+    entry, boxes = await _install_v120(hass, api)
+    online = _uid_to_entity_id(hass)["firewalla_box_default_online"]
+    await _unload(hass, entry)
+    _add_unrelated_records(hass, entry)
+
+    boxes.status = 200
+    await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
+    assert _uid_to_entity_id(hass)[f"firewalla_box_{BOX}_online"] == online
+    assert hass.states.get(online).state == "on"
+    assert "firewalla_wan_1_refresh" in _uid_to_entity_id(hass)
+    await _unload(hass, entry)
+
+
+async def test_upgrade_ignores_unrelated_records_two_boxes(hass, api, caplog):
+    """Multi-box legacy entry with unrelated records: loads untouched, and
+    Reconfigure offers the box choice."""
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    _add_unrelated_records(hass, entry)
+    before = _snapshot(hass, entry)
+
+    boxes.payload, boxes.status = [BOX_RECORD, OTHER_RECORD], 200
+    with caplog.at_level(logging.WARNING):
+        await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert _snapshot(hass, entry) == before
+    assert "the account has 2 boxes" in caplog.text
+    result = await _reconfigure(hass, entry)
+    assert result["type"] == "form"
+    assert result["step_id"] == "reconfigure_box"
+    await _unload(hass, entry)
+
+
+def _fail_on_entry_repair(hass):
+    real_update = hass.config_entries.async_update_entry
+
+    def fail(entry_, **kwargs):
+        if kwargs.get("unique_id") == BOX:
+            raise RuntimeError("interrupted")
+        return real_update(entry_, **kwargs)
+
+    return patch.object(hass.config_entries, "async_update_entry", fail)
+
+
+def _fail_on_entity_move(hass, number):
+    ent_reg = er.async_get(hass)
+    real_update_entity = ent_reg.async_update_entity
+    moves = 0
+
+    def fail(entity_id, **kwargs):
+        nonlocal moves
+        if "new_unique_id" in kwargs:
+            moves += 1
+            if moves == number:
+                raise RuntimeError("interrupted")
+        return real_update_entity(entity_id, **kwargs)
+
+    return patch.object(ent_reg, "async_update_entity", fail)
+
+
+def _fail_on_device_move(hass):
+    dev_reg = dr.async_get(hass)
+    real_update_device = dev_reg.async_update_device
+
+    def fail(device_id, **kwargs):
+        if "new_identifiers" in kwargs:
+            raise RuntimeError("interrupted")
+        return real_update_device(device_id, **kwargs)
+
+    return patch.object(dev_reg, "async_update_device", fail)
+
+
+def _make_v110_registry(hass, without_refresh=False):
+    """v1.1.0 had no box entities: only the refresh button and the box device
+    carry the gid, so the button can be the only record a repair moved, and
+    without it (removed by the user) the device is."""
+    ent_reg = er.async_get(hass)
+    keys = [f"firewalla_box_default_{key}" for key in LEGACY_BOX_KEYS]
+    if without_refresh:
+        keys.append("firewalla_default_refresh")
+    for unique_id in keys:
+        ent_reg.async_remove(_uid_to_entity_id(hass)[unique_id])
+
+
+@pytest.mark.parametrize(
+    ("interrupt", "v110"),
+    [
+        (lambda hass: _fail_on_entity_move(hass, 2), False),  # first record moved
+        (lambda hass: _fail_on_entity_move(hass, 4), False),
+        (_fail_on_device_move, False),  # every entity moved, the device not
+        (_fail_on_entry_repair, False),  # entities and device moved, the entry not
+        (_fail_on_device_move, "v1.1.0"),  # only the refresh button moved
+        (_fail_on_entry_repair, "no-refresh"),  # only the box device moved
+    ],
+    ids=[
+        "after-first-move",
+        "mid-entity-moves",
+        "before-device-move",
+        "before-entry",
+        "v1.1.0-before-device-move",
+        "v1.1.0-no-refresh-before-entry",
+    ],
+)
+async def test_interrupted_repair_without_saved_target(hass, api, interrupt, v110):
+    """Moved records but no saved target (e.g. config entries restored from an
+    older backup than the registries): setup keeps retrying rather than
+    duplicating entities, nothing is changed, and Reconfigure says why at once
+    instead of asking for credentials (second review)."""
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    if v110:
+        _make_v110_registry(hass, without_refresh=v110 == "no-refresh")
+    count = len(_uid_to_entity_id(hass))
+    boxes.status = 200
+    with interrupt(hass):
+        await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    await _unload(hass, entry)
+    hass.config_entries.async_update_entry(
+        entry,
+        data={k: v for k, v in entry.data.items() if k != CONF_PENDING_BOX_GID},
+    )
+    before = _snapshot(hass, entry)
+    assert entry.data[CONF_ACCESS_TOKEN] == TOKEN
+
+    await _setup(hass, entry)
+    assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
+    assert _snapshot(hass, entry) == before
+    assert len(_uid_to_entity_id(hass)) == count
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+    assert result["type"] == "abort"
+    assert result["reason"] == "repair_target_missing"
+    assert _snapshot(hass, entry) == before
+    await _unload(hass, entry)

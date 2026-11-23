@@ -27,6 +27,7 @@ from .const import (
     CONF_BOX_NAME,
     CONF_PENDING_BOX_GID,
     DOMAIN,
+    ENTITY_ID_FORMATS,
     LEGACY_BOX_GID,
     LEGACY_BOX_TITLE,
 )
@@ -51,37 +52,77 @@ def _repaired_unique_id(unique_id: str, box_gid: str) -> str | None:
     return None
 
 
+# The box entities' unique_ids are firewalla_box_<gid>_<key>, by domain.
+_BOX_ENTITY_KEYS = {
+    "binary_sensor": ("online",),
+    "sensor": (
+        "public_ip",
+        "total_devices",
+        "online_devices",
+        "alarms",
+        "firmware",
+        "blocked_flows",
+    ),
+}
+
+
+def _root_device_id(ent_reg: er.EntityRegistry, entry: ConfigEntry) -> str | None:
+    """The entry's box device: the one its rules summary sensor is on."""
+    entity_id = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, ENTITY_ID_FORMATS["rules_sensor"]
+    )
+    entity = ent_reg.async_get(entity_id) if entity_id else None
+    if entity is None or entity.config_entry_id != entry.entry_id:
+        return None
+    return entity.device_id
+
+
+def _box_entity_gid(entity: er.RegistryEntry, root_device_id: str | None) -> str | None:
+    """The gid in a box entity's unique_id; None for any other entity."""
+    unique_id = entity.unique_id
+    for key in _BOX_ENTITY_KEYS.get(entity.domain, ()):
+        prefix, suffix = "firewalla_box_", f"_{key}"
+        if unique_id.startswith(prefix) and unique_id.endswith(suffix):
+            return unique_id[len(prefix) : -len(suffix)] or None
+    # Only the refresh button on the box device: other *_refresh are not it.
+    if (
+        entity.domain == "button"
+        and root_device_id is not None
+        and entity.device_id == root_device_id
+        and unique_id.startswith("firewalla_")
+        and unique_id.endswith("_refresh")
+    ):
+        return unique_id[len("firewalla_") : -len("_refresh")] or None
+    return None
+
+
 def partially_repaired(
     ent_reg: er.EntityRegistry, dev_reg: dr.DeviceRegistry, entry: ConfigEntry
 ) -> bool:
     """Whether an interrupted repair left this entry's records on a real gid.
 
     A placeholder entry never creates them otherwise: its box entities and box
-    device all carry the placeholder gid.
+    device all carry the placeholder gid. Only records known to belong to the
+    box count, so records a later release adds can't make an untouched entry
+    look half-repaired. Moved records are found with or without a saved
+    target, so a missing target can't lead to loading on the placeholder.
     """
+    pinned = entry.data.get(CONF_PENDING_BOX_GID)
+    root_device_id = _root_device_id(ent_reg, entry)
     for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
         if entity.platform != DOMAIN:
             continue
-        if entity.unique_id.startswith(
-            "firewalla_box_"
-        ) and not entity.unique_id.startswith(_LEGACY_BOX_UID_PREFIX):
+        gid = _box_entity_gid(entity, root_device_id)
+        if gid is not None and gid != LEGACY_BOX_GID:
             return True
-        # The refresh button is the integration's only button.
-        if (
-            entity.domain == "button"
-            and entity.unique_id.endswith("_refresh")
-            and entity.unique_id != _LEGACY_REFRESH_UID
-        ):
+        if pinned and entity.unique_id == f"firewalla_{pinned}_refresh":
             return True
     for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
-        for domain, identifier in device.identifiers:
-            # Group devices are "group_<id>"; anything else is the box device.
-            if (
-                domain == DOMAIN
-                and identifier != LEGACY_BOX_GID
-                and not identifier.startswith("group_")
-            ):
-                return True
+        gids = {ident for domain, ident in device.identifiers if domain == DOMAIN}
+        if pinned and pinned in gids:
+            return True
+        if device.id == root_device_id and gids and LEGACY_BOX_GID not in gids:
+            return True
     return False
 
 
@@ -114,9 +155,12 @@ async def async_repair_legacy_box_identity(
 
     if resuming:
         if not pinned:
+            # Not loaded on the placeholder (that would duplicate the moved
+            # entities) and not guessed; Reconfigure explains what to do.
             raise ConfigEntryNotReady(
-                "Records of an interrupted box identity repair (#24) exist but "
-                "its target box was not saved"
+                "An interrupted box identity repair (#24) moved records but its "
+                "target box was not saved. Open Reconfigure on this entry for "
+                "what to do"
             )
         box_gid = pinned
         record = {
