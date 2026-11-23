@@ -78,8 +78,14 @@ def _root_device_id(ent_reg: er.EntityRegistry, entry: ConfigEntry) -> str | Non
 
 
 def _box_entity_gid(entity: er.RegistryEntry, root_device_id: str | None) -> str | None:
-    """The gid in a box entity's unique_id; None for any other entity."""
+    """The gid in a box entity's unique_id; None for any other entity.
+
+    When the box device is known, only entities on it count: a repair moves
+    unique_ids, never device links.
+    """
     unique_id = entity.unique_id
+    if root_device_id is not None and entity.device_id != root_device_id:
+        return None
     for key in _BOX_ENTITY_KEYS.get(entity.domain, ()):
         prefix, suffix = "firewalla_box_", f"_{key}"
         if unique_id.startswith(prefix) and unique_id.endswith(suffix):
@@ -88,7 +94,6 @@ def _box_entity_gid(entity: er.RegistryEntry, root_device_id: str | None) -> str
     if (
         entity.domain == "button"
         and root_device_id is not None
-        and entity.device_id == root_device_id
         and unique_id.startswith("firewalla_")
         and unique_id.endswith("_refresh")
     ):

@@ -810,7 +810,7 @@ def _add_unrelated_records(hass, entry):
     """Records a later release might add to an entry: not box evidence."""
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
-    dev_reg.async_get_or_create(
+    wan = dev_reg.async_get_or_create(
         config_entry_id=entry.entry_id, identifiers={(DOMAIN, "wan_1")}, name="WAN 1"
     )
     ent_reg.async_get_or_create(
@@ -818,6 +818,14 @@ def _add_unrelated_records(hass, entry):
     )
     ent_reg.async_get_or_create(
         "sensor", DOMAIN, "firewalla_box_wan_1_latency", config_entry=entry
+    )
+    # Shaped like a box sensor but on another device (dev-review of 58653a3).
+    ent_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "firewalla_box_wan_1_online_devices",
+        config_entry=entry,
+        device_id=wan.id,
     )
 
 
@@ -921,6 +929,7 @@ def _make_v110_registry(hass, without_refresh=False):
         (_fail_on_entry_repair, False),  # entities and device moved, the entry not
         (_fail_on_device_move, "v1.1.0"),  # only the refresh button moved
         (_fail_on_entry_repair, "no-refresh"),  # only the box device moved
+        (lambda hass: _fail_on_entity_move(hass, 4), "no-summary"),
     ],
     ids=[
         "after-first-move",
@@ -929,6 +938,7 @@ def _make_v110_registry(hass, without_refresh=False):
         "before-entry",
         "v1.1.0-before-device-move",
         "v1.1.0-no-refresh-before-entry",
+        "no-rules-summary-mid-entity-moves",
     ],
 )
 async def test_interrupted_repair_without_saved_target(hass, api, interrupt, v110):
@@ -938,7 +948,12 @@ async def test_interrupted_repair_without_saved_target(hass, api, interrupt, v11
     instead of asking for credentials (second review)."""
     entry, boxes = await _install_v120(hass, api)
     await _unload(hass, entry)
-    if v110:
+    if v110 == "no-summary":
+        # The box device can't be found: exact box entity forms still count.
+        er.async_get(hass).async_remove(
+            _uid_to_entity_id(hass)["firewalla_rules_summary"]
+        )
+    elif v110:
         _make_v110_registry(hass, without_refresh=v110 == "no-refresh")
     count = len(_uid_to_entity_id(hass))
     boxes.status = 200
@@ -1021,4 +1036,23 @@ async def test_pinned_refresh_button_alone_resumes_without_box_device(hass, api)
     uids = _uid_to_entity_id(hass)
     assert uids[f"firewalla_{BOX}_refresh"] == refresh
     assert "firewalla_default_refresh" not in uids
+    await _unload(hass, entry)
+
+
+async def test_unrelated_refresh_button_without_box_device(hass, api):
+    """When the box device can't be found (no rules summary sensor), a
+    *_refresh button is not evidence of a repair: it can't be tied to the box."""
+    entry, boxes = await _install_v120(hass, api)
+    await _unload(hass, entry)
+    ent_reg = er.async_get(hass)
+    ent_reg.async_remove(_uid_to_entity_id(hass)["firewalla_rules_summary"])
+    ent_reg.async_get_or_create(
+        "button", DOMAIN, "firewalla_wan_1_refresh", config_entry=entry
+    )
+
+    boxes.status = 200
+    await _setup(hass, entry)
+
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert entry.data[CONF_BOX_GID] == BOX
     await _unload(hass, entry)
