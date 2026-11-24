@@ -21,8 +21,8 @@ After adding it again:
 - The box status entities and the box's refresh button are new entities with new entity IDs named from the start of your box's ID (for example `binary_sensor.firewalla_box_default_online` becomes `binary_sensor.firewalla_box_3a7c9f1e_online`), and their history starts fresh. Update the automations, scripts and dashboards that use them.
 - Options start empty. The parental-control dashboard keeps its last content and is regenerated once dashboard users are set again.
 - The box device's custom name and area are lost.
-- On Home Assistant 2025.1 (tested), the rules summary and the rule switches and time-limit sensors on the box device also get new entity IDs, and other customizations are lost: renamed entity IDs, entity names, icons, areas, labels, and hidden or disabled settings, plus group device names and areas. Home Assistant 2026.11 restores the earlier entity IDs and customizations of entities that come back within 30 days with the same unique ID, which is every entity except the box status entities and the refresh button (checked in its source, not tested).
-- Removing the integration doesn't delete recorded history. An entity that comes back with the same entity ID keeps its history; history recorded under an old entity ID is kept as your recorder settings allow.
+- On Home Assistant 2025.1 (tested), the rules summary and the rule switches and time-limit sensors on the box device also get new entity IDs, and other customizations are lost: renamed entity IDs, entity names, icons, areas, labels, and hidden or disabled settings, plus group device names and areas. In Home Assistant 2026.11's source (not tested), an entity that comes back with the same unique ID within 30 days gets its customizations back, and its earlier entity ID if that is still available. The box status entities and the refresh button never do, because their unique IDs change.
+- Removing the integration doesn't delete recorded history. If an entity comes back with the same entity ID, its retained history stays associated with it. Retention follows your recorder settings.
 
 ## v1.2.0 (2026-11-08)
 
