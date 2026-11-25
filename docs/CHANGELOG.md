@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.2.1 (unreleased)
+
+### Bug Fixes
+
+- **Box status entities always unavailable** — setup saved a placeholder box ID (`default`) instead of the box's real ID, so the box online, public IP, firmware, device count, alarm and blocked-flow entities added in v1.2.0 never found their box. Setup now reads your boxes from the Firewalla API: an account with one box uses it, an account with several asks which one, and an account with none says so ([#24](https://github.com/djuntgen/firewalla-home-assistant/issues/24))
+
+### Upgrading an install set up on v1.2.0 or earlier
+
+v1.2.1 doesn't change existing installs. Rules, groups and devices keep working, but the box status entities stay unavailable until you remove the integration and add it again:
+
+1. Write down your options (rule filters, polling intervals, dashboard users) and the automations, scripts and dashboards that use Firewalla entities.
+2. Delete the Firewalla entry in Settings → Devices & services.
+3. Add the integration again, choose your box, and set your options again.
+
+Remove the old entry first. Adding the box while it still exists creates a second entry that competes with the first for the same rules, groups and devices, and which entry owns them can change after a restart.
+
+After adding it again:
+
+- The box status entities and the box's refresh button are new entities with new entity IDs named from the start of your box's ID (for example `binary_sensor.firewalla_box_default_online` becomes `binary_sensor.firewalla_box_3a7c9f1e_online`), and their history starts fresh. Update the automations, scripts and dashboards that use them.
+- Options start empty. The parental-control dashboard keeps its last content and is regenerated once dashboard users are set again.
+- The box device's custom name and area are lost.
+- On Home Assistant 2025.1 (tested), the rules summary and the rule switches and time-limit sensors on the box device also get new entity IDs, and other customizations are lost: renamed entity IDs, entity names, icons, areas, labels, and hidden or disabled settings, plus group device names and areas. In Home Assistant 2026.11's source (not tested), an entity that comes back with the same unique ID within 30 days gets its customizations back, and its earlier entity ID if that is still available. The box status entities and the refresh button never do, because their unique IDs change.
+- Removing the integration doesn't delete recorded history. If an entity comes back with the same entity ID, its retained history stays associated with it. Retention follows your recorder settings.
+
 ## v1.2.0 (2026-11-08)
 
 ### New Features

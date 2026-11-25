@@ -326,34 +326,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ) from err
 
     async def _get_available_boxes(self) -> None:
-        """Get available Firewalla boxes from MSP account."""
+        """Get the Firewalla boxes in the MSP account from /v2/boxes, by gid."""
         if not self._msp_domain or not self._access_token:
             raise InvalidAuth("MSP domain and access token are required")
 
         try:
             session = async_get_clientsession(self.hass)
             client = FirewallaMSPClient(session, self._msp_domain, self._access_token)
-
-            # Get list of boxes - for now we'll use rules endpoint to test access
-            # since the official examples don't show a boxes endpoint
-            _LOGGER.debug("Testing MSP API access by fetching rules")
-            rules_response = await client.get_rules()
-
-            if rules_response is not None:
-                # If we can access rules, create a dummy box entry
-                # In a real implementation, we'd use the actual boxes endpoint
-                self._available_boxes = {
-                    "default": {
-                        "gid": "default",
-                        "name": "Firewalla Box",
-                        "model": "Unknown",
-                        "online": True,
-                    }
-                }
-                _LOGGER.info("Successfully accessed MSP API rules endpoint")
-            else:
-                _LOGGER.warning("No response from MSP API rules endpoint")
-                self._available_boxes = {}
+            boxes = await client.get_boxes()
+            # Box statistics look the saved gid up in this same list.
+            self._available_boxes = {
+                box["gid"]: box
+                for box in (boxes if isinstance(boxes, list) else [])
+                if isinstance(box, dict)
+                and isinstance(box.get("gid"), str)
+                and box["gid"]
+            }
+            _LOGGER.debug("Found %d boxes in MSP account", len(self._available_boxes))
 
         except aiohttp.ClientError as err:
             _LOGGER.error("Cannot connect to MSP API: %s", err)
