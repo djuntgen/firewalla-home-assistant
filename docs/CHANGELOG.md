@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.2.1 (unreleased)
+## v1.2.1 (2026-11-25)
 
 ### Bug Fixes
 
